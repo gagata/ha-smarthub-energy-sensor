@@ -4,12 +4,20 @@ This is a custom integration used to scrape data from a smarthub portal (used by
 
 # Setup
 
-## Manual installation
+## Installation
+
+### Manual Installation
 
 Clone this repository in your home assistant's `custom_components` directory:
 ```
 git clone git@github.com:gagata/ha-smarthub-energy-sensor.git
 ```
+
+### Using HACS
+
+- Copy the repository address: `https://github.com/gagata/ha-smarthub-energy-sensor.git`
+- Add the repository as custom repository in HACS: HACS -> click on 3-dot menu -> Custom Repositories -> Paste the URL and pick "Integration" and click "ADD"
+- Go to HACS and search for `SmartHub Coop Integration` and click "Download"
 
 ## Configuration
 
