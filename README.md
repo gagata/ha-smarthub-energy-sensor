@@ -15,9 +15,18 @@ git clone git@github.com:gagata/ha-smarthub-energy-sensor.git
 
 ### Using HACS
 
+You can use the following shortcut
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=gagata&repository=ha-smarthub-energy-sensor)
+
+
+Or add the custom repository to your HACS installation:
+
 - Copy the repository address: `https://github.com/gagata/ha-smarthub-energy-sensor.git`
 - Add the repository as custom repository in HACS: HACS -> click on 3-dot menu -> Custom Repositories -> Paste the URL and pick "Integration" and click "ADD"
 - Go to HACS and search for `SmartHub Coop Integration` and click "Download"
+
+
 
 ## Configuration
 
