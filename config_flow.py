@@ -16,6 +16,15 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
+            # Generate a unique ID from input that should uniquely identify this account/host
+            # This is crucial for Home Assistant to manage the integration instance.
+            unique_id = f"{user_input['email']}_{user_input['host']}_{user_input['account_id']}"
+            
+            # Set the unique ID for this config entry.
+            # If an entry with this unique ID already exists, abort the flow.
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured() # Check if already configured
+
             try:
                 # Validate credentials by attempting to get a token
                 api = SmartHubAPI(
@@ -25,19 +34,25 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     location_id=user_input["location_id"],
                     host=user_input["host"],
                 )
-                await self.hass.async_add_executor_job(api.get_token)
+                
+                # Note: If SmartHubAPI.get_token is not truly async (e.g., uses blocking requests),
+                # hass.async_add_executor_job is correct. If it's pure aiohttp/httpx async,
+                # you can just await it directly: `await api.get_token()`.
+                # Given api.py uses aiohttp, you can likely do:
+                await api.get_token()
 
                 # Debug log for successful connection
-                _LOGGER.debug("Successfully validated credentials in config_flow.")
+                _LOGGER.debug("Successfully validated credentials in config_flow and set unique_id: %s", unique_id)
 
                 # Create an entry with the user-provided data
+                # The unique_id is now automatically associated with this entry
                 return self.async_create_entry(title="SmartHub", data=user_input)
 
-            except Exception:
-                _LOGGER.error("Error validating credentials in config_flow.")
+            except Exception as e: # Catch specific exceptions for better error handling
+                _LOGGER.error("Error validating credentials in config_flow: %s", e)
                 errors["base"] = "cannot_connect"
 
-        # Show the form again if validation failed
+        # Show the form again if validation failed or it's the first time
         schema = vol.Schema(
             {
                 vol.Required("email"): str,
@@ -49,4 +64,3 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
-
