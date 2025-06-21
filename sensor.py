@@ -94,10 +94,12 @@ class SmartHubEnergySensor(CoordinatorEntity, Entity):
     @property
     def extra_state_attributes(self):
         """Return additional attributes."""
-        # 'state_class', 'unit_of_measurement', and 'device_class' are now direct properties,
+        # 'unit_of_measurement' is now a direct property,
         # but you can add other relevant attributes from your API here if desired.
         attrs = {
             "icon": "mdi:power-plug",
+            "device_class":"energy",
+            "state_class":"total_increasing",
         }
         # Example: if your API provides other useful data, add it here
         # if self.coordinator.data:
@@ -109,16 +111,6 @@ class SmartHubEnergySensor(CoordinatorEntity, Entity):
     def unit_of_measurement(self):
         """Return the unit of measurement."""
         return "kWh"
-
-    @property
-    def device_class(self):
-        """Return the device class."""
-        return "energy"
-
-    @property
-    def state_class(self):
-        """Return the state class."""
-        return "total_increasing"
 
     @property
     def device_info(self):
