@@ -6,7 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+## v1.1.0 -> 2025-07-29
 ### Added
 * **Enhanced Device Information (`device_info` property):**
     * The `SmartHubEnergySensor` now exposes a `device_info` property. This creates a conceptual "device" in Home Assistant's Device Registry, improving organization by grouping your sensor under a dedicated "Device" card in Settings > Devices & Services.
