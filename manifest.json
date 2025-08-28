@@ -1,13 +1,13 @@
 {
   "domain": "smarthub",
   "name": "SmartHub Coop Energy",
-  "codeowners": ["@gagata"],
+  "codeowners": ["@salmeister"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/gagata/ha-smarthub-energy-sensor",
+  "documentation": "https://github.com/salmeister/ha-smarthub-energy-sensor",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/gagata/ha-smarthub-energy-sensor/issues",
-  "requirements": ["aiohttp"],
-  "version": "v1.0.0"
+  "issue_tracker": "https://github.com/salmeister/ha-smarthub-energy-sensor/issues",
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "v2.0.0"
 }
 

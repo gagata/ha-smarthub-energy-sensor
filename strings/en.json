@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SmartHub Energy Integration",
+        "description": "Enter your SmartHub credentials and configuration. Poll interval should be between {min_poll} and {max_poll} minutes.",
+        "data": {
+          "email": "Email Address",
+          "password": "Password",
+          "account_id": "Account ID",
+          "location_id": "Location ID",
+          "host": "SmartHub Host",
+          "poll_interval": "Poll Interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to SmartHub. Please check your host and network connection.",
+      "invalid_auth": "Invalid credentials. Please check your email and password.",
+      "invalid_input": "Invalid input provided. Please check all fields.",
+      "unknown": "Unexpected error occurred. Please check the logs."
+    },
+    "abort": {
+      "already_configured": "SmartHub integration is already configured for this account and host."
+    }
+  }
+}
