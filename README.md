@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/github/v/release/salmeister/ha-smarthub-energy-sensor)](https://github.com/salmeister/ha-smarthub-energy-sensor/releases)
 [![License](https://img.shields.io/github/license/salmeister/ha-smarthub-energy-sensor)](LICENSE)
 
-A production-ready Home Assistant custom integration that connects to SmartHub Coop energy portals to provide real-time electricity usage data. This integration is fully compatible with Home Assistant's Energy Dashboard and provides reliable, stable monitoring for your energy consumption.
+A Home Assistant custom integration that connects to SmartHub Coop energy portals to provide real-time electricity usage data. This integration is fully compatible with Home Assistant's Energy Dashboard and provides reliable, stable monitoring for your energy consumption.
 
 ## ✨ Features
 
