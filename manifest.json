@@ -1,0 +1,13 @@
+{
+  "domain": "smarthub",
+  "name": "SmartHub Coop Energy",
+  "codeowners": ["@salmeister"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/salmeister/ha-smarthub-energy-sensor",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/salmeister/ha-smarthub-energy-sensor/issues",
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "2.1.0"
+}
+
