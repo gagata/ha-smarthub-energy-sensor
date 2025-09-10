@@ -16,6 +16,9 @@ from homeassistant.exceptions import ConfigEntryError
 from .api import SmartHubAPI
 from .const import DOMAIN
 
+# Import config flow to ensure it's registered
+from . import config_flow  # noqa: F401
+
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
