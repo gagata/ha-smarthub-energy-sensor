@@ -1,12 +1,12 @@
 """Simple config flow for SmartHub integration."""
 import voluptuous as vol
 from homeassistant import config_entries
+from .const import DOMAIN
 
 
-class SmartHubConfigFlow(config_entries.ConfigFlow):
+class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SmartHub."""
 
-    DOMAIN = "smarthub"
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
