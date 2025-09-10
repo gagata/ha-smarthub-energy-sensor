@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
 
-from .const import DEFAULT_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+from .const import DEFAULT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, SESSION_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,21 +112,57 @@ class SmartHubAPI:
         self.timeout = timeout
         self.token: Optional[str] = None
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_created_at: Optional[datetime] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session."""
+        now = datetime.now()
+        
+        # Check if session needs refresh due to age
+        if (self._session_created_at and 
+            (now - self._session_created_at).total_seconds() > SESSION_TIMEOUT):
+            _LOGGER.debug("Session timeout reached, refreshing session")
+            if self._session and not self._session.closed:
+                await self._session.close()
+            self._session = None
+            self._session_created_at = None
+        
         if self._session is None or self._session.closed:
             timeout = ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
                 connector=aiohttp.TCPConnector(ssl=True, limit=10),
             )
+            self._session_created_at = now
+            _LOGGER.debug("Created new aiohttp session")
         return self._session
 
     async def close(self) -> None:
         """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+            self._session = None
+
+    async def _refresh_authentication(self) -> None:
+        """
+        Refresh authentication by clearing session and getting new token.
+        
+        This method ensures we start with a clean session state when
+        authentication issues occur.
+        """
+        _LOGGER.debug("Refreshing authentication and session")
+        
+        # Close existing session to clear any stale state
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+            self._session_created_at = None
+        
+        # Clear the old token
+        self.token = None
+        
+        # Get a fresh token with a new session
+        await self.get_token()
 
     async def get_token(self) -> str:
         """
@@ -187,17 +223,7 @@ class SmartHubAPI:
         Raises:
             SmartHubAPIError: If the request fails after retries.
         """
-        if not self.token:
-            await self.get_token()
-
         poll_url = f"https://{self.host}/services/secured/utility-usage/poll"
-        headers = {
-            "Authority": self.host,
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json",
-            "X-Nisc-Smarthub-Username": self.email,
-            "User-Agent": "HomeAssistant SmartHub Integration",
-        }
 
         # Calculate startDateTime and endDateTime
         now = datetime.now()
@@ -222,23 +248,43 @@ class SmartHubAPI:
 
         _LOGGER.debug("Requesting energy data from: %s", poll_url)
 
+        # Track if we've already tried refreshing the token
+        token_refreshed = False
+        
         for attempt in range(1, MAX_RETRIES + 1):
             try:
+                # Ensure we have a valid token before making the request
+                if not self.token or (attempt == 1 and token_refreshed):
+                    await self._refresh_authentication()
+                    token_refreshed = True
+
+                headers = {
+                    "Authority": self.host,
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json",
+                    "X-Nisc-Smarthub-Username": self.email,
+                    "User-Agent": "HomeAssistant SmartHub Integration",
+                }
+
                 session = await self._get_session()
                 async with session.post(poll_url, headers=headers, json=data) as response:
                     _LOGGER.debug("Attempt %d: Response status: %s", attempt, response.status)
 
                     if response.status == 401:
-                        # Token expired, try to get a new one
-                        if attempt == 1:
-                            _LOGGER.info("Token expired, refreshing...")
-                            await self.get_token()
+                        if not token_refreshed:
+                            # Token expired, refresh and retry
+                            _LOGGER.info("Token expired, refreshing authentication...")
+                            await self._refresh_authentication()
+                            token_refreshed = True
                             continue
                         else:
+                            # Already tried refreshing, this is a persistent auth issue
                             raise SmartHubAuthError("Authentication failed after token refresh")
                     elif response.status != 200:
+                        error_text = await response.text()
+                        _LOGGER.warning("HTTP error %d: %s", response.status, error_text)
                         raise SmartHubConnectionError(
-                            f"HTTP error {response.status}: {await response.text()}"
+                            f"HTTP error {response.status}: {error_text}"
                         )
 
                     try:
@@ -263,6 +309,9 @@ class SmartHubAPI:
                         _LOGGER.warning("Unexpected status in response: %s", status)
                         return None
 
+            except SmartHubAuthError:
+                # Re-raise auth errors immediately
+                raise
             except ClientError as e:
                 if attempt < MAX_RETRIES:
                     _LOGGER.warning(

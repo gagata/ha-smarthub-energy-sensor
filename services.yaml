@@ -1,11 +1,17 @@
 # SmartHub Energy Integration Services
 
-# Future services can be added here for diagnostics, manual refresh, etc.
-# Examples:
-# refresh_data:
-#   name: Refresh Energy Data
-#   description: Manually refresh energy usage data from SmartHub
-#   target:
-#     entity:
-#       domain: sensor
-#       integration: smarthub
+refresh_data:
+  name: Refresh Energy Data
+  description: Manually refresh energy usage data from SmartHub
+  target:
+    entity:
+      domain: sensor
+      integration: smarthub
+  
+refresh_authentication:
+  name: Refresh Authentication
+  description: Force refresh of SmartHub authentication token
+  target:
+    entity:
+      domain: sensor
+      integration: smarthub

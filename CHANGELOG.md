@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v2.0.1 - 2025-09-10
+### Fixed
+* **🔑 Critical Authentication Fix**: Resolved "Authentication failed after token refresh" error that caused sensors to become unavailable after a few days
+* **🔄 Session Management**: Improved session handling to prevent stale authentication state
+* **⏰ Session Timeouts**: Added automatic session refresh after 5 minutes to prevent connection staleness
+* **🛡️ Retry Logic**: Enhanced authentication retry logic to properly handle token expiration scenarios
+* **🧹 Resource Cleanup**: Better cleanup of authentication state during refresh operations
+
+### Added
+* **🛠️ Manual Services**: Added `refresh_data` and `refresh_authentication` services for manual troubleshooting
+* **📊 Enhanced Logging**: More detailed logging for authentication and session management issues
+* **⚡ Session Lifecycle**: Automatic session recreation when authentication issues occur
+
+### Changed
+* **🔧 Authentication Flow**: Completely redesigned authentication refresh to eliminate session conflicts
+* **🔒 Token Management**: Improved token lifecycle management with proper cleanup
+* **📡 Error Handling**: Better distinction between authentication and connection errors
+
 ## v2.0.0 - 2025-08-28
 ### Added
 * **🚀 Production-Ready Architecture**: Complete rewrite for stability and reliability

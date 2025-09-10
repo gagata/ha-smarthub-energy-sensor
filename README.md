@@ -148,6 +148,28 @@ logger:
     custom_components.smarthub: debug
 ```
 
+### Manual Services
+
+The integration provides two services for manual troubleshooting:
+
+**Refresh Data Service**
+```yaml
+# Example service call to manually refresh data
+service: smarthub.refresh_data
+data:
+  entity_id: sensor.smarthub_energy_123456
+```
+
+**Refresh Authentication Service**
+```yaml
+# Example service call to force authentication refresh
+service: smarthub.refresh_authentication
+data:
+  entity_id: sensor.smarthub_energy_123456
+```
+
+These services can be called from Developer Tools → Services or used in automations.
+
 ### Support
 
 If you encounter issues:

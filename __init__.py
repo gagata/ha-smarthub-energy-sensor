@@ -5,8 +5,10 @@ import logging
 from typing import Dict, Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import entity_registry
+import voluptuous as vol
 
 from .api import SmartHubAPI
 from .const import DOMAIN, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
@@ -14,6 +16,18 @@ from .const import DOMAIN, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = ["sensor"]
+
+# Service schemas
+SERVICE_REFRESH_DATA = "refresh_data"
+SERVICE_REFRESH_AUTH = "refresh_authentication"
+
+SERVICE_REFRESH_DATA_SCHEMA = vol.Schema({
+    vol.Required("entity_id"): str,
+})
+
+SERVICE_REFRESH_AUTH_SCHEMA = vol.Schema({
+    vol.Required("entity_id"): str,
+})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -59,6 +73,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
+    # Register services
+    async def handle_refresh_data(call: ServiceCall):
+        """Handle the refresh_data service call."""
+        entity_id = call.data["entity_id"]
+        _LOGGER.info("Manual refresh requested for entity: %s", entity_id)
+        
+        # Find the coordinator for this entity
+        ent_reg = entity_registry.async_get(hass)
+        entity_entry = ent_reg.async_get(entity_id)
+        
+        if entity_entry and entity_entry.config_entry_id == entry.entry_id:
+            # Trigger refresh for the coordinator
+            coordinator = hass.data[DOMAIN][entry.entry_id].get("coordinator")
+            if coordinator:
+                await coordinator.async_request_refresh()
+                _LOGGER.info("Refresh completed for entity: %s", entity_id)
+            else:
+                _LOGGER.error("No coordinator found for entity: %s", entity_id)
+        else:
+            _LOGGER.error("Entity not found or not part of SmartHub integration: %s", entity_id)
+
+    async def handle_refresh_auth(call: ServiceCall):
+        """Handle the refresh_authentication service call."""
+        entity_id = call.data["entity_id"]
+        _LOGGER.info("Authentication refresh requested for entity: %s", entity_id)
+        
+        # Force authentication refresh
+        api = hass.data[DOMAIN][entry.entry_id]["api"]
+        try:
+            await api._refresh_authentication()
+            _LOGGER.info("Authentication refresh completed for entity: %s", entity_id)
+        except Exception as e:
+            _LOGGER.error("Failed to refresh authentication for entity %s: %s", entity_id, e)
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH_DATA, handle_refresh_data, schema=SERVICE_REFRESH_DATA_SCHEMA
+    )
+    
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH_AUTH, handle_refresh_auth, schema=SERVICE_REFRESH_AUTH_SCHEMA
+    )
+    
     return True
 
 
@@ -68,6 +124,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok:
+        # Remove services
+        hass.services.async_remove(DOMAIN, SERVICE_REFRESH_DATA)
+        hass.services.async_remove(DOMAIN, SERVICE_REFRESH_AUTH)
+        
         # Clean up API connection
         data = hass.data[DOMAIN].get(entry.entry_id)
         if data and "api" in data:

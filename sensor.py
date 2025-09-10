@@ -20,7 +20,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .api import SmartHubAPI, SmartHubAPIError
+from .api import SmartHubAPI, SmartHubAPIError, SmartHubAuthError
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_KEY,
@@ -55,6 +55,9 @@ async def async_setup_entry(
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
+
+    # Store coordinator reference for services
+    hass.data[DOMAIN][config_entry.entry_id]["coordinator"] = coordinator
 
     # Create sensor entities
     entities = [
@@ -102,6 +105,11 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Successfully fetched data: %s", data)
             return data
             
+        except SmartHubAuthError as e:
+            _LOGGER.error("Authentication error fetching SmartHub data: %s", e)
+            # For auth errors, we want to raise UpdateFailed to trigger retry
+            # but also ensure the API will refresh authentication on next attempt
+            raise UpdateFailed(f"Authentication failed: {e}") from e
         except SmartHubAPIError as e:
             _LOGGER.error("Error fetching data from SmartHub API: %s", e)
             raise UpdateFailed(f"Error communicating with SmartHub API: {e}") from e

@@ -19,6 +19,7 @@ MAX_POLL_INTERVAL = 1440  # Maximum 24 hours
 DEFAULT_TIMEOUT = 30  # seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
+SESSION_TIMEOUT = 300  # 5 minutes - force session refresh
 
 # Sensor constants
 ENERGY_SENSOR_KEY = "current_energy_usage"
