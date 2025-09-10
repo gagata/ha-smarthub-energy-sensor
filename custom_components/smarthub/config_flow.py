@@ -107,9 +107,10 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
         await api.close()
 
 
-class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class SmartHubConfigFlow(config_entries.ConfigFlow):
     """Handle a config flow for SmartHub."""
 
+    DOMAIN = DOMAIN
     VERSION = 1
 
     async def async_step_user(
