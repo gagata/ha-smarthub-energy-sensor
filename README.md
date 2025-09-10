@@ -47,6 +47,9 @@ config/
 │       ├── manifest.json
 │       ├── sensor.py
 │       ├── services.yaml
+│       ├── icons/
+│       │   ├── icon.svg
+│       │   └── README.md
 │       └── strings/
 │           └── en.json
 ```

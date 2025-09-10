@@ -3,5 +3,7 @@
   "content_in_root": true,
   "render_readme": true,
   "country": ["US"],
-  "hide_default_branch": false
+  "hide_default_branch": false,
+  "zip_release": false,
+  "filename": "smarthub.zip"
 }
