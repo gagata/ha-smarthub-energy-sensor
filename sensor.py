@@ -40,10 +40,9 @@ async def async_setup_entry(
     """Set up the SmartHub sensor platform."""
     _LOGGER.debug("Setting up SmartHub sensor platform")
 
-    data = hass.data[DOMAIN][config_entry.entry_id]
-    api: SmartHubAPI = data["api"]
-    poll_interval: int = data["poll_interval"]
-    config: Dict[str, Any] = data["config"]
+    api: SmartHubAPI = hass.data[DOMAIN][config_entry.entry_id]
+    poll_interval: int = config_entry.data.get("poll_interval", 300)
+    config: Dict[str, Any] = config_entry.data
 
     # Create update coordinator
     coordinator = SmartHubDataUpdateCoordinator(
@@ -57,7 +56,15 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     # Store coordinator reference for services
-    hass.data[DOMAIN][config_entry.entry_id]["coordinator"] = coordinator
+    if not isinstance(hass.data[DOMAIN][config_entry.entry_id], dict):
+        # Convert simple API storage to dict with backward compatibility
+        api_instance = hass.data[DOMAIN][config_entry.entry_id]
+        hass.data[DOMAIN][config_entry.entry_id] = {
+            "api": api_instance,
+            "coordinator": coordinator,
+        }
+    else:
+        hass.data[DOMAIN][config_entry.entry_id]["coordinator"] = coordinator
 
     # Create sensor entities
     entities = [
