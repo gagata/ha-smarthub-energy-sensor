@@ -1,8 +1,8 @@
 # Home Assistant SmartHub Energy Sensor Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/github/v/release/salmeister/ha-smarthub-energy-sensor)](https://github.com/salmeister/ha-smarthub-energy-sensor/releases)
-[![License](https://img.shields.io/github/license/salmeister/ha-smarthub-energy-sensor)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/gagata/ha-smarthub-energy-sensor)](https://github.com/gagata/ha-smarthub-energy-sensor/releases)
+[![License](https://img.shields.io/github/license/gagata/ha-smarthub-energy-sensor)](LICENSE)
 
 A Home Assistant custom integration that connects to SmartHub Coop energy portals to provide real-time electricity usage data. This integration is fully compatible with Home Assistant's Energy Dashboard and provides reliable, stable monitoring for your energy consumption.
 
@@ -22,16 +22,16 @@ A Home Assistant custom integration that connects to SmartHub Coop energy portal
 
 1. Open HACS in your Home Assistant instance
 2. Click on the three-dot menu and select "Custom repositories"
-3. Add this repository URL: `https://github.com/salmeister/ha-smarthub-energy-sensor`
+3. Add this repository URL: `https://github.com/gagata/ha-smarthub-energy-sensor`
 4. Select "Integration" as the category
 5. Click "ADD" and then search for "SmartHub Energy"
 6. Click "Download" to install
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=salmeister&repository=ha-smarthub-energy-sensor)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=gagata&repository=ha-smarthub-energy-sensor)
 
 ### Option 2: Manual Installation
 
-1. Download the latest release from the [releases page](https://github.com/salmeister/ha-smarthub-energy-sensor/releases)
+1. Download the latest release from the [releases page](https://github.com/gagata/ha-smarthub-energy-sensor/releases)
 2. Extract the `smarthub` folder to your `custom_components` directory
 3. Restart Home Assistant
 
@@ -180,7 +180,7 @@ If you encounter issues:
 1. Check the Home Assistant logs for error messages
 2. Verify all configuration parameters are correct
 3. Test access to your SmartHub portal manually
-4. [Open an issue](https://github.com/salmeister/ha-smarthub-energy-sensor/issues) with logs and details
+4. [Open an issue](https://github.com/gagata/ha-smarthub-energy-sensor/issues) with logs and details
 
 ## 🔒 Security & Privacy
 
@@ -213,7 +213,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and version history.
 
 - Thanks to [@tedpearson](https://github.com/tedpearson) for the [Go implementation](https://github.com/tedpearson/electric-usage-downloader) that provided inspiration
 - Original integration concept by [@gagata](https://github.com/gagata)
-- Production improvements and maintenance by [@salmeister](https://github.com/salmeister)
+- Production improvements and maintenance by [@gagata](https://github.com/gagata)
 
 ## 📄 License
 

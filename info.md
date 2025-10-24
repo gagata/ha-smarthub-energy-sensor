@@ -27,4 +27,4 @@ You'll need your SmartHub portal credentials:
 
 ## Support
 
-Visit the [GitHub repository](https://github.com/salmeister/ha-smarthub-energy-sensor) for documentation, issues, and updates.
+Visit the [GitHub repository](https://github.com/gagata/ha-smarthub-energy-sensor) for documentation, issues, and updates.

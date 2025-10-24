@@ -2,7 +2,7 @@
 Custom integration to integrate SmartHub Coop energy sensors with Home Assistant.
 
 For more details about this integration, please refer to
-https://github.com/salmeister/ha-smarthub-energy-sensor
+https://github.com/gagata/ha-smarthub-energy-sensor
 """
 from __future__ import annotations
 
