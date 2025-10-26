@@ -68,6 +68,7 @@ class SmartHubAPI:
         self.host = host
         self.timeout = timeout
         self.token: Optional[str] = None
+        self.primary_username: Optional[str] = None
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_created_at: Optional[datetime] = None
 
@@ -228,6 +229,7 @@ class SmartHubAPI:
                     raise SmartHubDataError(f"Invalid JSON response: {e}") from e
 
                 self.token = response_json.get("authorizationToken")
+                self.primary_username = response_json.get("primaryUsername", self.email)
 
                 if not self.token:
                     raise SmartHubAuthError("No authorization token in response")
@@ -249,7 +251,7 @@ class SmartHubAPI:
             SmartHubAPIError: If the request fails after retries.
         """
         user_data_url = f"https://{self.host}/services/secured/user-data"
-        params = f"userId={self.email}"
+        params = f"userId={self.primary_username}"
 
         if not self.token:
             await self._refresh_authentication()
