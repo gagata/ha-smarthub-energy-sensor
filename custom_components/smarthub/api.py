@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from typing import Any, Dict, Optional, List
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
+import pyotp
 
 from .const import DEFAULT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, SESSION_TIMEOUT
 
@@ -29,67 +31,20 @@ class SmartHubConnectionError(SmartHubAPIError):
 class SmartHubDataError(SmartHubAPIError):
     """Data parsing error."""
 
+class SmartHubLocation():
+    """Smarthub Location object - contains location_id, location_description, etc"""
 
-def parse_last_usage(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Parse the JSON data and extract the last data point for usage.
+    def __init__(
+        self,
+        id: str,
+        description: str
+    )  -> None:
+        """Initialize the SmartHubLocation."""
+        self.id = id
+        self.description = description
 
-    Args:
-        data: The JSON data as a Python dictionary.
-
-    Returns:
-        A dictionary containing the usage data and metadata, or None if not found.
-    
-    Raises:
-        SmartHubDataError: If there's an error parsing the data.
-    """
-    try:
-        if not isinstance(data, dict):
-            raise SmartHubDataError("Invalid data format: expected dictionary")
-
-        # Locate the "ELECTRIC" data
-        electric_data = data.get("data", {}).get("ELECTRIC", [])
-        if not electric_data:
-            _LOGGER.warning("No ELECTRIC data found in response")
-            return None
-
-        for entry in electric_data:
-            # Find the entry with type "USAGE"
-            if entry.get("type") == "USAGE":
-                series = entry.get("series", [])
-                for serie in series:
-                    # Extract the last data point in the "data" array
-                    usage_data = serie.get("data", [])
-                    if usage_data:
-                        last_data_point = usage_data[-1]
-                        timestamp = last_data_point.get("x")
-                        value = last_data_point.get("y")
-                        
-                        if value is None:
-                            _LOGGER.warning("No usage value found in last data point")
-                            continue
-                            
-                        # Convert timestamp to readable format if available
-                        reading_time = None
-                        if timestamp:
-                            try:
-                                # Assuming timestamp is in milliseconds
-                                reading_time = datetime.fromtimestamp(timestamp / 1000).isoformat()
-                            except (ValueError, TypeError) as e:
-                                _LOGGER.warning("Could not parse timestamp %s: %s", timestamp, e)
-
-                        return {
-                            "current_energy_usage": float(value),
-                            "last_reading_time": reading_time,
-                            "raw_timestamp": timestamp,
-                        }
-
-        _LOGGER.warning("No USAGE data found in ELECTRIC entries")
-        return None
-
-    except Exception as e:
-        raise SmartHubDataError(f"Error parsing usage data: {e}") from e
-
+    def __str__(self):
+        return f"[SmartHubLocation: '{self.id}' '{self.description}']"
 
 class SmartHubAPI:
     """Class to interact with the SmartHub API."""
@@ -99,7 +54,8 @@ class SmartHubAPI:
         email: str,
         password: str,
         account_id: str,
-        location_id: str,
+        timezone: str,
+        mfa_totp: str,
         host: str,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
@@ -107,26 +63,88 @@ class SmartHubAPI:
         self.email = email
         self.password = password
         self.account_id = account_id
-        self.location_id = location_id
+        self.timezone = timezone
+        self.mfa_totp = mfa_totp
         self.host = host
         self.timeout = timeout
         self.token: Optional[str] = None
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_created_at: Optional[datetime] = None
 
+
+    def parse_usage(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Parse the JSON data and extract the last data point for usage.
+
+        Args:
+            data: The JSON data as a Python dictionary.
+
+        Returns:
+            A dictionary containing the "USAGE" with a list of parsed data and metadata, or an empty dictionary if not found.
+
+        Raises:
+            SmartHubDataError: If there's an error parsing the data.
+        """
+        try:
+            parsed_response = {}
+
+            if not isinstance(data, dict):
+                raise SmartHubDataError("Invalid data format: expected dictionary")
+
+            # Locate the "ELECTRIC" data
+            electric_data = data.get("data", {}).get("ELECTRIC", [])
+            if len(electric_data) == 0:
+              _LOGGER.warning("No ELECTRIC data found in response")
+
+            for entry in electric_data:
+                # Find the entry with type "USAGE"
+                if entry.get("type","") == "USAGE":
+                    parsed_data = []
+                    series = entry.get("series", [])
+                    for serie in series:
+                        # Extract the last data point in the "data" array
+                        usage_data = serie.get("data", [])
+
+                        for usage in usage_data:
+                            event_time = datetime.fromtimestamp(usage.get("x") / 1000.0, tz=timezone.utc).replace(tzinfo=ZoneInfo(self.timezone)) # convert microseconds to timestmap -> read data as if it was in provider TZ, then conver to UTC for statistics
+                            # HA stats import wants timestamps only at standard intervals -
+                            # https://github.com/home-assistant/core/blob/4fef19c7bc7c1f7be827f6c489ad1df232e44906/homeassistant/components/recorder/statistics.py#L2634
+                            if event_time.minute != 0:
+                              _LOGGER.debug("consolidating sub hour data: %s, %s + %s", event_time, parsed_data[-1]['consumption'], usage.get("y"))
+                              parsed_data[-1]['consumption'] += usage.get("y")
+                              continue
+
+                            # Ignore events with no energy recording
+                            if usage.get("y") == 0:
+                              continue
+
+                            parsed_data.append({
+                              "reading_time" : event_time,
+                              "consumption" : usage.get("y"),
+                              "raw_timestamp": usage.get("x"),
+                            })
+                    _LOGGER.debug("Parsed %d items for usage history", len(parsed_data))
+                    parsed_response["USAGE"] = parsed_data
+
+            return parsed_response
+
+        except Exception as e:
+            raise SmartHubDataError(f"Error parsing usage data: {e}") from e
+
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session."""
         now = datetime.now()
-        
+
         # Check if session needs refresh due to age
-        if (self._session_created_at and 
+        if (self._session_created_at and
             (now - self._session_created_at).total_seconds() > SESSION_TIMEOUT):
             _LOGGER.debug("Session timeout reached, refreshing session")
             if self._session and not self._session.closed:
                 await self._session.close()
             self._session = None
             self._session_created_at = None
-        
+
         if self._session is None or self._session.closed:
             timeout = ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
@@ -146,31 +164,31 @@ class SmartHubAPI:
     async def _refresh_authentication(self) -> None:
         """
         Refresh authentication by clearing session and getting new token.
-        
+
         This method ensures we start with a clean session state when
         authentication issues occur.
         """
         _LOGGER.debug("Refreshing authentication and session")
-        
+
         # Close existing session to clear any stale state
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
             self._session_created_at = None
-        
+
         # Clear the old token
         self.token = None
-        
+
         # Get a fresh token with a new session
         await self.get_token()
 
     async def get_token(self) -> str:
         """
         Authenticate and retrieve the token asynchronously.
-        
+
         Returns:
             The authentication token.
-            
+
         Raises:
             SmartHubAuthError: If authentication fails.
             SmartHubConnectionError: If there's a connection error.
@@ -181,7 +199,13 @@ class SmartHubAPI:
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "HomeAssistant SmartHub Integration",
         }
+
         payload = f"password={self.password}&userId={self.email}"
+
+        if self.mfa_totp != "":
+          totp = pyotp.TOTP(self.mfa_totp)
+          current_otp = totp.now()
+          payload = f"{payload}&twoFactorCode={current_otp}"
 
         _LOGGER.debug("Sending authentication request to: %s", auth_url)
 
@@ -204,6 +228,7 @@ class SmartHubAPI:
                     raise SmartHubDataError(f"Invalid JSON response: {e}") from e
 
                 self.token = response_json.get("authorizationToken")
+
                 if not self.token:
                     raise SmartHubAuthError("No authorization token in response")
 
@@ -213,13 +238,116 @@ class SmartHubAPI:
         except ClientError as e:
             raise SmartHubConnectionError(f"Connection error during authentication: {e}") from e
 
-    async def get_energy_data(self) -> Optional[Dict[str, Any]]:
+    async def get_service_locations(self) -> List[SmartHubLocation]:
+        """
+        Retrieve details about the service locaitons
+
+        Returns:
+            List of SmartHubLocation
+
+        Raises:
+            SmartHubAPIError: If the request fails after retries.
+        """
+        user_data_url = f"https://{self.host}/services/secured/user-data"
+        params = f"userId={self.email}"
+
+        if not self.token:
+            await self._refresh_authentication()
+
+        headers = {
+            "Authority": self.host,
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+            "X-Nisc-Smarthub-Username": self.email,
+            "User-Agent": "HomeAssistant SmartHub Integration",
+        }
+
+        try:
+            session = await self._get_session()
+            async with session.get(user_data_url, headers=headers, params=params) as response:
+                response_text = await response.text()
+                _LOGGER.debug("User Data response status: %s", response.status)
+
+                if response.status == 401:
+                    raise SmartHubAuthError("Invalid credentials")
+                elif response.status != 200:
+                    raise SmartHubConnectionError(
+                        f"User_data request failed with HTTP status: {response.status}"
+                    )
+
+                try:
+                    response_json = await response.json()
+                except Exception as e:
+                    raise SmartHubDataError(f"Invalid JSON response: {e}") from e
+
+                # Response format is structured as a list of dictionaries -
+                # each dictionary has the following keys
+                #   "account",
+                #   "additionalCustomerName",
+                #   "address",
+                #   "agreementStatus",
+                #   "consumerClassCode",
+                #   "customer",
+                #   "customerName",
+                #   "disconnectNonPay",
+                #   "email",
+                #   "inactive",
+                #   "invoiceGroupNumber",
+                #   "isAutoPay",
+                #   "isDisconnected",
+                #   "isMultiService",
+                #   "isPendingDisconnect",
+                #   "isUnCollectible",
+                #   "primaryServiceLocationId",
+                #   "providerOrServiceDescription",
+                #   "providerToDescription",
+                #   "providerToProviderDescription",
+                #   "serviceLocationIdToServiceLocationSummary",
+                #   "serviceLocationToIndustries",
+                #   "serviceLocationToProviders",
+                #   "serviceLocationToUserDataServiceLocationSummaries",
+                #   "serviceToProviders",
+                #   "serviceToServiceDescription",
+                #   "services"
+                # `serviceLocationToUserDataServiceLocationSummaries` Includes human readable information about the service location.
+                # Which is a map of the location_id, to a list of
+                  #  "activeRateSchedules",
+                  #  "address",
+                  #  "description",
+                  #  "id",
+                  #  "lastBillPresReadDtTm",
+                  #  "lastBillPrevReadDtTm",
+                  #  "location",
+                  #  "serviceStatus",
+                  #  "services"
+
+                locations = []
+                if len(response_json) != 1:
+                  raise SmartHubDataError(f"Expected only a single entry in the user data response: {response_json}")
+
+                for location_id, service_description in response_json[0].get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
+                  if len(service_description) != 1:
+                    raise SmartHubDataError(f"Expected only a single entry in the service description: {service_description}")
+
+                  locations.append(
+                    SmartHubLocation(
+                      id=location_id,
+                      description=service_description[0].get("description", "unknown"),
+                    )
+                  )
+
+                return locations
+
+        except ClientError as e:
+            raise SmartHubConnectionError(f"Connection error during User_data request: {e}") from e
+
+    async def get_energy_data(self, location, start_datetime=None, aggregation="MONTHLY") -> Optional[Dict[str, Any]]:
         """
         Retrieve energy usage data asynchronously with retry logic.
-        
+
         Returns:
             Parsed energy usage data or None if no data available.
-            
+
         Raises:
             SmartHubAPIError: If the request fails after retries.
         """
@@ -227,19 +355,21 @@ class SmartHubAPI:
 
         # Calculate startDateTime and endDateTime
         now = datetime.now()
-        # Get data for the last 30 days ending at 5 PM today
-        end_time = now.replace(hour=17, minute=0, second=0, microsecond=0)
-        start_time = end_time - timedelta(days=30)
+        # Get data since specified start (or last 30 days) as of midnight yesterday
+        end_datetime = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if start_datetime == None:
+          # fetch data from last period
+          start_datetime = end_datetime - timedelta(days=30)
 
-        start_timestamp = int(start_time.timestamp()) * 1000
-        end_timestamp = int(end_time.timestamp()) * 1000
+        start_timestamp = int(start_datetime.timestamp()) * 1000
+        end_timestamp = int(end_datetime.timestamp()) * 1000
 
         data = {
-            "timeFrame": "MONTHLY",
+            "timeFrame": aggregation,
             "userId": self.email,
             "screen": "USAGE_EXPLORER",
             "includeDemand": False,
-            "serviceLocationNumber": self.location_id,
+            "serviceLocationNumber": location.id,
             "accountNumber": self.account_id,
             "industries": ["ELECTRIC"],
             "startDateTime": str(start_timestamp),
@@ -250,11 +380,11 @@ class SmartHubAPI:
 
         # Track if we've already tried refreshing the token
         token_refreshed = False
-        
+
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                # Ensure we have a valid token before making the request
-                if not self.token or (attempt == 1 and token_refreshed):
+                # If token is unset - refresh auth
+                if not self.token:
                     await self._refresh_authentication()
                     token_refreshed = True
 
@@ -304,7 +434,7 @@ class SmartHubAPI:
                             return None
                     elif status == "COMPLETE":
                         _LOGGER.debug("Successfully retrieved energy data")
-                        return parse_last_usage(response_json)
+                        return self.parse_usage(response_json)
                     else:
                         _LOGGER.warning("Unexpected status in response: %s", status)
                         return None
@@ -315,7 +445,7 @@ class SmartHubAPI:
             except ClientError as e:
                 if attempt < MAX_RETRIES:
                     _LOGGER.warning(
-                        "Attempt %d failed with connection error: %s, retrying...", 
+                        "Attempt %d failed with connection error: %s, retrying...",
                         attempt, e
                     )
                     await asyncio.sleep(RETRY_DELAY)

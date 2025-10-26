@@ -1,0 +1,31 @@
+{
+  "title": "SmartHub Energy Ingtegration",
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "email": "Email Address",
+          "password": "Password",
+          "account_id": "Account ID",
+          "host": "SmartHub Host",
+          "timezone": "Timezone for power company",
+          "mfa_totp": "MFA TOTP Seed"
+        },
+        "data_description" : {
+          "host": "e.g XXXXXX.smarthub.coop",
+          "timezone": "Timezone for power company",
+          "mfa_totp": "MFA TOTP Seed - only required if using MFA"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to SmartHub. Please check your host and network connection.",
+      "invalid_auth": "Invalid credentials. Please check your email and password.",
+      "invalid_input": "Invalid input provided. Please check all fields.",
+      "unknown": "Unexpected error occurred. Please check the logs."
+    },
+    "abort": {
+      "already_configured": "SmartHub integration is already configured for this account and host."
+    }
+  }
+}
