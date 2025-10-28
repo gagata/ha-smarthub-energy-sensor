@@ -75,9 +75,7 @@ Before setting up the integration, you'll need to gather the following informati
    - Enter your email address
    - Enter your password
    - Enter your account ID
-   - Enter your location ID
    - Enter your SmartHub host
-   - Set your preferred poll interval (15-1440 minutes, default: 60 minutes)
 
 The integration will validate your credentials and create the energy sensor automatically.
 
@@ -90,6 +88,7 @@ Once configured, your SmartHub energy sensor will automatically appear in Home A
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **"Add Consumption"** in the Electricity grid section
 3. Select your SmartHub energy sensor from the dropdown
+   Note: there will be multiple entries - select the one that says "Hourly usage"
 4. The sensor will now provide data to your Energy Dashboard
 
 ### Sensor Details

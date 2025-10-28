@@ -81,21 +81,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if unload_ok:
         # Clean up API connection
-        data = hass.data[DOMAIN].get(entry.entry_id)
+        data = hass.data.get(DOMAIN,{}).get(entry.entry_id)
+
+        if hasattr(entry, "runtime_data") and hasattr(entry.runtime_data, "api"):
+            api= entry.runtime_data.api
+
         if data:
             if isinstance(data, dict) and "api" in data:
                 api = data["api"]
             else:
                 api = data  # Direct API reference
 
-            if api:
-                await api.close()
+        if api:
+            await api.close()
 
         # Remove data
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data.get(DOMAIN,{}).pop(entry.entry_id, None)
 
         # Remove domain data if no entries left
-        if not hass.data[DOMAIN]:
+        if DOMAIN in hass.data:
             hass.data.pop(DOMAIN, None)
 
     return unload_ok

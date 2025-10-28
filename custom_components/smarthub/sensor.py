@@ -159,7 +159,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
         consumption_metadata = StatisticMetaData(
             mean_type=StatisticMeanType.NONE,
             has_sum=True,
-            name=f"SmartHub Energy Sensor - {self.account_id} - {location.description}",
+            name=f"SmartHub Energy Hourly Usage - {self.account_id} - {location.description}",
             source=DOMAIN,
             statistic_id=consumption_statistic_id,
 #             unit_class=consumption_unit_class, # required in 2025.11
@@ -176,8 +176,12 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Updating statistic for the first time")
             consumption_sum = 0.0
             last_stats_time = None
+
+            # Initialize with last 90 days of data
+            start_datetime = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=90)
+
             # Load read data for use in populating statistics
-            smarthub_data = await self.api.get_energy_data(location=location, aggregation="HOURLY")
+            smarthub_data = await self.api.get_energy_data(location=location, aggregation="HOURLY", start_datetime=start_datetime)
         else:
             _LOGGER.debug("Checking if data migration is needed...")
             migrated = False
@@ -251,7 +255,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             consumption_sum = _safe_get_sum(stats.get(consumption_statistic_id, []))
             last_stats_time = stats[consumption_statistic_id][0]["start"]
 
-            _LOGGER.info(f"Updating statistictics since %s", last_stats_time)
+            _LOGGER.info(f"Updating statistics since %s", last_stats_time)
 
         consumption_statistics = []
 
@@ -307,7 +311,7 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
         # Extract account info for naming
         account_id = config.get("account_id", "Unknown")
 
-        self._attr_name = f"SmartHub Energy {account_id} {self.location.id}"
+        self._attr_name = f"SmartHub Energy Monthly Usage {account_id} {self.location.description}"
 
         _LOGGER.debug("Initialized SmartHub energy sensor with unique_id: %s", self._attr_unique_id)
 
@@ -357,7 +361,7 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
 
         return {
             "identifiers": {(DOMAIN, self._config_entry.unique_id or self._config_entry.entry_id)},
-            "name": f"SmartHub Energy Monitor ({account_id} - {self.location.description})",
+            "name": f"SmartHub Energy Monthly Usage ({account_id} - {self.location.description})",
             "manufacturer": "SmartHub Coop",
             "model": "Energy Monitor",
             "configuration_url": f"https://{host}",
