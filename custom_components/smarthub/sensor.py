@@ -101,6 +101,9 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             _LOGGER.debug("Fetching data from SmartHub API")
 
+            # force a logout of the session
+            self.api.token = None
+
             locations = await self.api.get_service_locations()
 
             entity_response = {}
