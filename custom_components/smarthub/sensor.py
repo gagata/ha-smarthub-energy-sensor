@@ -114,7 +114,9 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
               await self._insert_statistics(location)
 
               # Fetch monthly information for entity value
-              data = await self.api.get_energy_data(location=location)
+              first_day_of_current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+              data = await self.api.get_energy_data(location=location, start_datetime=first_day_of_current_month)
 
               if data.get("USAGE", None) is None:
                   _LOGGER.warning("No data received from SmartHub API for location %s", location)

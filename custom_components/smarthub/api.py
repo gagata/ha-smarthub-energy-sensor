@@ -358,7 +358,7 @@ class SmartHubAPI:
         # Calculate startDateTime and endDateTime
         now = datetime.now()
         # Get data since specified start (or last 30 days) as of midnight yesterday
-        end_datetime = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_datetime = now.replace(minute=0, second=0, microsecond=0)
         if start_datetime == None:
           # fetch data from last period
           start_datetime = end_datetime - timedelta(days=30)
