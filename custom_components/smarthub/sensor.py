@@ -216,11 +216,16 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             # Update reads...
             # Load read data for use in populating statistics
             start_datetime = datetime.fromtimestamp(last_stat[consumption_statistic_id][0]["start"], tz=timezone.utc)
+
+            # always backdate the start_datetime to ensure no gaps in recorded data
+            start_datetime = start_datetime - timedelta(days=2)
+
             _LOGGER.debug("Fetching statistics from %s", start_datetime)
             smarthub_data = await self.api.get_energy_data(location=location, start_datetime=start_datetime, aggregation="HOURLY")
 
             start = smarthub_data.get("USAGE")[0].get("reading_time")
             _LOGGER.debug("Getting statistics at: %s", start)
+
             # In the common case there should be a previous statistic at start time
             # so we only need to fetch one statistic. If there isn't any, fetch all.
             # Counterintutitively - but consistent with opower - this aligns the
