@@ -6,14 +6,26 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional, List
+from enum import Enum
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
 import pyotp
 
-from .const import DEFAULT_TIMEOUT, MAX_RETRIES, RETRY_DELAY, SESSION_TIMEOUT
+from .const import (
+    DEFAULT_TIMEOUT,
+    MAX_RETRIES,
+    RETRY_DELAY,
+    SESSION_TIMEOUT,
+    ELECTRIC_SERVICE,
+    SUPPORTED_SERVICES,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+class Aggregation(Enum):
+  HOURLY = "HOURLY"
+  MONTHLY = "MONTHLY"
 
 
 class SmartHubAPIError(Exception):
@@ -37,14 +49,16 @@ class SmartHubLocation():
     def __init__(
         self,
         id: str,
+        service: str,
         description: str
     )  -> None:
         """Initialize the SmartHubLocation."""
         self.id = id
+        self.service = service
         self.description = description
 
     def __str__(self):
-        return f"[SmartHubLocation: '{self.id}' '{self.description}']"
+        return f"[SmartHubLocation: '{self.id}' '{self.service}' '{self.description}']"
 
 class SmartHubAPI:
     """Class to interact with the SmartHub API."""
@@ -201,19 +215,22 @@ class SmartHubAPI:
             "User-Agent": "HomeAssistant SmartHub Integration",
         }
 
-        payload = f"password={self.password}&userId={self.email}"
+        payload = {
+          "password": self.password,
+          "userId": self.email,
+        }
 
         if self.mfa_totp != "":
           totp = pyotp.TOTP(self.mfa_totp)
           current_otp = totp.now()
-          payload = f"{payload}&twoFactorCode={current_otp}"
+          payload["twoFactorCode"] = current_otp
 
         _LOGGER.debug("Sending authentication request to: %s", auth_url)
 
         try:
             session = await self._get_session()
-            async with session.post(auth_url, headers=headers, data=payload) as response:
-                response_text = await response.text()
+            async with session.post(auth_url, headers=headers, params=payload) as response:
+                _ = await response.text()
                 _LOGGER.debug("Auth response status: %s", response.status)
 
                 if response.status == 401:
@@ -251,7 +268,9 @@ class SmartHubAPI:
             SmartHubAPIError: If the request fails after retries.
         """
         user_data_url = f"https://{self.host}/services/secured/user-data"
-        params = f"userId={self.primary_username}"
+        payload = {
+          "userId" : self.primary_username,
+        }
 
         if not self.token:
             await self._refresh_authentication()
@@ -266,8 +285,8 @@ class SmartHubAPI:
 
         try:
             session = await self._get_session()
-            async with session.get(user_data_url, headers=headers, params=params) as response:
-                response_text = await response.text()
+            async with session.get(user_data_url, headers=headers, params=payload) as response:
+                _ = await response.text()
                 _LOGGER.debug("User Data response status: %s", response.status)
 
                 if response.status == 401:
@@ -324,26 +343,27 @@ class SmartHubAPI:
                   #  "services"
 
                 locations = []
-                if len(response_json) != 1:
-                  raise SmartHubDataError(f"Expected only a single entry in the user data response: {response_json}")
+                _LOGGER.debug(response_json)
 
-                for location_id, service_description in response_json[0].get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
-                  if len(service_description) != 1:
-                    raise SmartHubDataError(f"Expected only a single entry in the service description: {service_description}")
-
-                  locations.append(
-                    SmartHubLocation(
-                      id=location_id,
-                      description=service_description[0].get("description", "unknown"),
-                    )
-                  )
+                for entry in response_json:
+                  for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
+                    for service_description in service_descriptions:
+                      # for now only support electric service type
+                      if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
+                        locations.append(
+                          SmartHubLocation(
+                            id=location_id,
+                            service=ELECTRIC_SERVICE,
+                            description=service_description.get("description", "unknown"),
+                          )
+                        )
 
                 return locations
 
         except ClientError as e:
             raise SmartHubConnectionError(f"Connection error during User_data request: {e}") from e
 
-    async def get_energy_data(self, location, start_datetime=None, aggregation="MONTHLY") -> Optional[Dict[str, Any]]:
+    async def get_energy_data(self, location, start_datetime=None, aggregation:Aggregation=Aggregation.HOURLY) -> Optional[Dict[str, Any]]:
         """
         Retrieve energy usage data asynchronously with retry logic.
 
@@ -359,7 +379,7 @@ class SmartHubAPI:
         now = datetime.now()
         # Get data since specified start (or last 30 days) as of midnight yesterday
         end_datetime = now.replace(minute=0, second=0, microsecond=0)
-        if start_datetime == None:
+        if start_datetime is None:
           # fetch data from last period
           start_datetime = end_datetime - timedelta(days=30)
 
@@ -367,7 +387,7 @@ class SmartHubAPI:
         end_timestamp = int(end_datetime.timestamp()) * 1000
 
         data = {
-            "timeFrame": aggregation,
+            "timeFrame": aggregation.value,
             "userId": self.email,
             "screen": "USAGE_EXPLORER",
             "includeDemand": False,

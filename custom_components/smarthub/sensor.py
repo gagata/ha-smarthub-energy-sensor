@@ -1,8 +1,6 @@
 """SmartHub energy sensor platform."""
 from __future__ import annotations
 
-import traceback
-
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -34,7 +32,7 @@ from homeassistant.components.recorder.models import (
     StatisticMetaData,
 )
 
-from .api import SmartHubAPI, SmartHubAPIError, SmartHubAuthError, SmartHubLocation
+from .api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubAuthError, SmartHubLocation
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_KEY,
@@ -42,6 +40,7 @@ from .const import (
     ATTR_ACCOUNT_ID,
     ATTR_LOCATION_ID,
     LOCATION_KEY,
+    HISTORICAL_IMPORT_DAYS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +57,10 @@ async def async_setup_entry(
     config: Dict[str, Any] = config_entry.data
 
     coordinator = config_entry.runtime_data
+
+    # Ensure that it is the smartHub coordinator
+    assert type(coordinator) is SmartHubDataUpdateCoordinator
+
     last_locations_consumption = coordinator.data.values()
 
     # Create sensor entities for each location
@@ -73,7 +76,7 @@ async def async_setup_entry(
       )
 
     async_add_entities(entities, update_before_add=True)
-    _LOGGER.debug("SmartHub sensor entities added successfully")
+    _LOGGER.debug(f"{len(entities)} SmartHub sensor entities added successfully")
 
 
 class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
@@ -182,11 +185,11 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             consumption_sum = 0.0
             last_stats_time = None
 
-            # Initialize with last 90 days of data
-            start_datetime = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=90)
+            # Initialize with last HISTORICAL_IMPORT_DAYS (usually 90) days of data
+            start_datetime = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=HISTORICAL_IMPORT_DAYS)
 
             # Load read data for use in populating statistics
-            smarthub_data = await self.api.get_energy_data(location=location, aggregation="HOURLY", start_datetime=start_datetime)
+            smarthub_data = await self.api.get_energy_data(location=location, aggregation=Aggregation.HOURLY, start_datetime=start_datetime)
         else:
             _LOGGER.debug("Checking if data migration is needed...")
             migrated = False
@@ -221,7 +224,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             start_datetime = start_datetime - timedelta(days=2)
 
             _LOGGER.debug("Fetching statistics from %s", start_datetime)
-            smarthub_data = await self.api.get_energy_data(location=location, start_datetime=start_datetime, aggregation="HOURLY")
+            smarthub_data = await self.api.get_energy_data(location=location, start_datetime=start_datetime, aggregation=Aggregation.HOURLY)
 
             start = smarthub_data.get("USAGE")[0].get("reading_time")
             _LOGGER.debug("Getting statistics at: %s", start)
@@ -265,7 +268,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             consumption_sum = _safe_get_sum(stats.get(consumption_statistic_id, []))
             last_stats_time = stats[consumption_statistic_id][0]["start"]
 
-            _LOGGER.info(f"Updating statistics since %s", last_stats_time)
+            _LOGGER.info(f"Updating statistics since {last_stats_time}")
 
         consumption_statistics = []
 
