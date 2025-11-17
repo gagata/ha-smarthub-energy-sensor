@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+ * Support for MFA login via Timebased One Time Tokens
+ * Support for historical hourly energy statistics
+ * Auto-detection of location IDs, as well as support for multiple locations
+
+### Changed
+ * The state entity ID is now includes the locationID which is not migrated to the new ID value. Historical monthly state data will be orphaned.
+
+### Removed
+
+### Fixed
+
 ## v2.0.1 - 2025-09-10
 ### Fixed
 * **🔑 Critical Authentication Fix**: Resolved "Authentication failed after token refresh" error that caused sensors to become unavailable after a few days

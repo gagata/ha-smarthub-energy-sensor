@@ -7,7 +7,7 @@
   "documentation": "https://github.com/gagata/ha-smarthub-energy-sensor",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/gagata/ha-smarthub-energy-sensor/issues",
-  "requirements": ["aiohttp>=3.8.0"],
+  "requirements": ["aiohttp>=3.8.0", "pyotp"],
   "version": "2.1.4"
 }
 

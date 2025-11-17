@@ -1,16 +1,20 @@
 {
+  "title": "SmartHub Energy Integration",
   "config": {
     "step": {
       "user": {
-        "title": "SmartHub Energy Integration",
-        "description": "Enter your SmartHub credentials and configuration. Poll interval should be between {min_poll} and {max_poll} minutes.",
         "data": {
           "email": "Email Address",
           "password": "Password",
           "account_id": "Account ID",
-          "location_id": "Location ID",
           "host": "SmartHub Host",
-          "poll_interval": "Poll Interval (minutes)"
+          "timezone": "Timezone for power company",
+          "mfa_totp": "MFA TOTP Seed"
+        },
+        "data_description" : {
+          "host": "e.g XXXXXX.smarthub.coop",
+          "timezone": "Timezone for power company",
+          "mfa_totp": "MFA TOTP Seed - only required if using MFA"
         }
       }
     },

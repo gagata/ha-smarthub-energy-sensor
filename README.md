@@ -8,7 +8,7 @@ A Home Assistant custom integration that connects to SmartHub Coop energy portal
 
 ## ✨ Features
 
-- 🔌 **Energy Dashboard Integration**: Seamlessly works with Home Assistant's built-in Energy Dashboard
+- 🔌 **Energy Dashboard Integration**: Seamlessly works with Home Assistant's built-in Energy Dashboard, including backfilling hourly metrics
 - 📊 **Real-time Monitoring**: Tracks your electricity usage with configurable polling intervals
 - 🔒 **Secure Authentication**: Robust credential handling with proper error management
 - 🔄 **Automatic Retry**: Built-in retry logic for reliable data collection
@@ -47,10 +47,11 @@ config/
 │       ├── manifest.json
 │       ├── sensor.py
 │       ├── services.yaml
+│       ├── strings.json
 │       ├── icons/
 │       │   ├── icon.svg
 │       │   └── README.md
-│       └── strings/
+│       └── translations/
 │           └── en.json
 ```
 
@@ -64,20 +65,6 @@ Before setting up the integration, you'll need to gather the following informati
 2. **Password**: Your SmartHub portal password
 3. **Host**: Your energy provider's SmartHub domain (e.g., `yourprovider.smarthub.coop`)
 4. **Account ID**: Found on your billing statements
-5. **Location ID**: Retrieved from the SmartHub portal (see instructions below)
-
-### Getting Your Location ID
-
-The Location ID is required for the integration to work properly. Here's how to find it:
-
-1. Log into your SmartHub portal
-2. Navigate to the "Usage Explorer" page
-3. Open your browser's Developer Tools (F12)
-4. Go to the "Network" tab
-5. Refresh the page or navigate within the usage section
-6. Look for a call to `services/secured/utility-usage/poll`
-7. Click on this request and go to the "Payload" or "Request" tab
-8. Copy the value of the `serviceLocationNumber` field
 
 ### Setup Process
 
@@ -88,9 +75,7 @@ The Location ID is required for the integration to work properly. Here's how to 
    - Enter your email address
    - Enter your password
    - Enter your account ID
-   - Enter your location ID
    - Enter your SmartHub host
-   - Set your preferred poll interval (15-1440 minutes, default: 60 minutes)
 
 The integration will validate your credentials and create the energy sensor automatically.
 
@@ -103,6 +88,7 @@ Once configured, your SmartHub energy sensor will automatically appear in Home A
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **"Add Consumption"** in the Electricity grid section
 3. Select your SmartHub energy sensor from the dropdown
+   Note: there will be multiple entries - select the one that says "Hourly usage"
 4. The sensor will now provide data to your Energy Dashboard
 
 ### Sensor Details
@@ -138,6 +124,10 @@ Once configured, your SmartHub energy sensor will automatically appear in Home A
 - Verify your Account ID and Location ID are correct
 - Check that your account has recent usage data in the SmartHub portal
 - Some providers may have delays in data availability
+
+**"Energy Statistics are offset from the right time"**
+- Update the timezone where your SmartHub utility is located.
+  This can be done easily via when you reconfigure the integration.
 
 ### Debug Logging
 

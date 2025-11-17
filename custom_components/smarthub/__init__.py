@@ -14,7 +14,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 
 from .api import SmartHubAPI
+from .sensor import  SmartHubDataUpdateCoordinator
 from .const import DOMAIN
+
+from datetime import timedelta
 
 # Remove explicit config flow import
 # from . import config_flow  # noqa: F401
@@ -29,9 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config = entry.data
 
     # Validate required configuration
-    required_fields = ["email", "password", "account_id", "location_id", "host"]
+    required_fields = ["email", "password", "account_id", "host"]
     missing_fields = [field for field in required_fields if not config.get(field)]
-    
+
     if missing_fields:
         _LOGGER.error("Missing required configuration fields: %s", missing_fields)
         raise ConfigEntryError(f"Missing configuration fields: {missing_fields}")
@@ -41,7 +44,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         email=config["email"],
         password=config["password"],
         account_id=config["account_id"],
-        location_id=config["location_id"],
+        timezone=config.get("timezone", "GMT"), # timezone was not previously required - default it to be GMT
+        mfa_totp=config.get("mfa_totp", ""), # mfa_totp is optional
         host=config["host"],
     )
 
@@ -54,13 +58,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await api.close()
         raise ConfigEntryError(f"Cannot connect to SmartHub: {e}") from e
 
-    # Store the API instance in hass.data
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = api
+    # Create update coordinator, and store in the config entry
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass=hass,
+        api=api,
+        update_interval=timedelta(minutes=config.get("poll_interval", 720)),
+        config_entry=entry,
+    )
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
+
     return True
 
 
@@ -68,25 +78,29 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
+
     if unload_ok:
         # Clean up API connection
-        data = hass.data[DOMAIN].get(entry.entry_id)
+        data = hass.data.get(DOMAIN,{}).get(entry.entry_id)
+
+        if hasattr(entry, "runtime_data") and hasattr(entry.runtime_data, "api"):
+            api= entry.runtime_data.api
+
         if data:
             if isinstance(data, dict) and "api" in data:
                 api = data["api"]
             else:
                 api = data  # Direct API reference
-            
-            if api:
-                await api.close()
-        
+
+        if api:
+            await api.close()
+
         # Remove data
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        
+        hass.data.get(DOMAIN,{}).pop(entry.entry_id, None)
+
         # Remove domain data if no entries left
-        if not hass.data[DOMAIN]:
+        if DOMAIN in hass.data:
             hass.data.pop(DOMAIN, None)
-    
+
     return unload_ok
 
