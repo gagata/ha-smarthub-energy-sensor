@@ -18,19 +18,19 @@ jobs:
       - name: Get version from tag
         id: tag_name
         run: |
-          echo "current_version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          FULL_TAG=${GITHUB_REF#refs/tags/}
+          echo "full_tag=$FULL_TAG" >> $GITHUB_OUTPUT
+          echo "current_version=${FULL_TAG#v}" >> $GITHUB_OUTPUT
         shell: bash
         
       - name: Determine release type
         id: release_type
         run: |
-          VERSION=${{ steps.tag_name.outputs.current_version }}
-          if [[ $VERSION == *"alpha"* ]] || [[ $VERSION == *"beta"* ]] || [[ $VERSION == *"rc"* ]]; then
+          FULL_TAG=${{ steps.tag_name.outputs.full_tag }}
+          if [[ $FULL_TAG == *"alpha"* ]] || [[ $FULL_TAG == *"beta"* ]] || [[ $FULL_TAG == *"rc"* ]]; then
             echo "prerelease=true" >> $GITHUB_OUTPUT
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
             echo "prerelease=false" >> $GITHUB_OUTPUT
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
         shell: bash
         
