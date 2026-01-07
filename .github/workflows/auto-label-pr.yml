@@ -20,15 +20,16 @@ jobs:
             const labelsToAdd = [];
             
             // Extract labels based on PR template checkboxes
-            if (body.includes('🛠 Breaking Change')) {
+            // Check for checked checkboxes (markdown format: - [x] 🛠 Breaking Change)
+            if (body.includes('- [x] 🛠 Breaking Change')) {
               labelsToAdd.push('breaking');
-            } else if (body.includes('🎉 New Feature') || body.includes('feature')) {
+            } else if (body.includes('- [x] 🎉 New Feature') || body.includes('feature')) {
               labelsToAdd.push('feature');
-            } else if (body.includes('🐛 Bug Fix') || body.includes('bug')) {
+            } else if (body.includes('- [x] 🐛 Bug Fix') || body.includes('bug')) {
               labelsToAdd.push('bug');
-            } else if (body.includes('⚡ Performance') || body.includes('performance')) {
+            } else if (body.includes('- [x] ⚡ Performance') || body.includes('performance')) {
               labelsToAdd.push('performance');
-            } else if (body.includes('🔧 Maintenance') || body.includes('maintenance')) {
+            } else if (body.includes('- [x] 🔧 Maintenance') || body.includes('maintenance')) {
               labelsToAdd.push('maintenance');
             }
             
