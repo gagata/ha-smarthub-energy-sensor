@@ -1,0 +1,71 @@
+name: Auto-Label Pull Request
+on:
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  auto-label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Extract and Apply Labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const labelsToAdd = [];
+            
+            // Extract labels based on PR template checkboxes
+            if (body.includes('🛠 Breaking Change')) {
+              labelsToAdd.push('breaking');
+            } else if (body.includes('🎉 New Feature') || body.includes('feature')) {
+              labelsToAdd.push('feature');
+            } else if (body.includes('🐛 Bug Fix') || body.includes('bug')) {
+              labelsToAdd.push('bug');
+            } else if (body.includes('⚡ Performance') || body.includes('performance')) {
+              labelsToAdd.push('performance');
+            } else if (body.includes('🔧 Maintenance') || body.includes('maintenance')) {
+              labelsToAdd.push('maintenance');
+            }
+            
+            // Add labels if any found
+            if (labelsToAdd.length > 0) {
+              console.log(`Adding labels: ${labelsToAdd.join(', ')}`);
+              
+              // Get existing labels
+              const existingLabels = context.payload.pull_request.labels.map(l => l.name);
+              
+              // Remove any conflicting labels first
+              const conflictingLabels = [];
+              labelsToAdd.forEach(label => {
+                if (existingLabels.includes(label) && !labelsToAdd.includes(label)) {
+                  conflictingLabels.push(label);
+                }
+              });
+              
+              // Remove conflicting labels
+              if (conflictingLabels.length > 0) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: conflictingLabels
+                });
+              }
+              
+              // Add new labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labelsToAdd
+              });
+              
+              console.log(`Applied ${labelsToAdd.length} labels to PR #${context.issue.number}`);
+            } else {
+              console.log('No matching labels found based on PR template');
+            }

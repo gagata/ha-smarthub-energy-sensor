@@ -181,12 +181,27 @@ If you encounter issues:
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to:
+Contributions are welcome! Please follow these guidelines:
 
+### Pull Request Process
+1. Fork the repository and create a feature branch
+2. Make your changes and ensure they follow the existing code style
+3. Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) when opening your pull request
+4. Select the appropriate change type in the PR template - this automatically labels your PR for release notes
+5. Ensure your changes don't break existing functionality
+
+### Code Style
+- Follow Python PEP 8 standards
+- Use type hints for new functions
+- Add appropriate logging for debugging
+- Keep error messages user-friendly
+
+### What to Contribute
 - Report bugs or issues
 - Suggest new features
 - Submit pull requests
 - Improve documentation
+- Add tests for new functionality
 
 ## 📋 Limitations
 
@@ -195,9 +210,7 @@ Contributions are welcome! Please feel free to:
 - Currently supports electricity usage only (no gas or other utilities)
 - Requires active SmartHub portal access
 
-## 📜 Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and version history.
 
 ## 🙏 Credits
 

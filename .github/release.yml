@@ -1,0 +1,27 @@
+# SmartHub Release Notes Configuration
+# Simple, clean automation based on PR template labels
+
+changelog:
+  # Exclude dependency PRs and ignore items from release notes
+  exclude:
+    labels:
+      - dependencies
+      - ignore-for-release
+
+  
+  # Clean categorization matching PR template
+  categories:
+    - title: 🛠 Breaking Changes
+      labels: [breaking]
+        
+    - title: 🎉 New Features
+      labels: [feature]
+        
+    - title: 🐛 Bug Fixes
+      labels: [bug]
+        
+    - title: ⚡ Performance & Reliability
+      labels: [performance]
+        
+    - title: 🔧 Code Quality & Maintenance
+      labels: [maintenance]
