@@ -21,6 +21,19 @@ jobs:
           echo "current_version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
         shell: bash
         
+      - name: Determine release type
+        id: release_type
+        run: |
+          VERSION=${{ steps.tag_name.outputs.current_version }}
+          if [[ $VERSION == *"alpha"* ]] || [[ $VERSION == *"beta"* ]] || [[ $VERSION == *"rc"* ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+        
       - name: Generate Release Notes
         id: release_notes
         uses: softprops/action-gh-release@v1
@@ -29,6 +42,6 @@ jobs:
           name: Release ${{ steps.tag_name.outputs.current_version }}
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.release_type.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
