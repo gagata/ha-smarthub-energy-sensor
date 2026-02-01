@@ -28,9 +28,19 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
     StatisticData,
-    StatisticMeanType,
     StatisticMetaData,
 )
+
+try:
+    from homeassistant.components.recorder.models import StatisticMeanType
+except ImportError:
+    from enum import Enum
+    class StatisticMeanType(str, Enum):
+        NONE = "none"
+        MEAN = "mean"
+        MAX = "max"
+        MIN = "min"
+
 
 from .api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubAuthError, SmartHubLocation
 from .const import (
