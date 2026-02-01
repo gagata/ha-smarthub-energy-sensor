@@ -1,6 +1,6 @@
 """Test file for basic SmartHub integration functionality."""
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
@@ -105,7 +105,10 @@ async def test_async_setup_entry_success(mock_hass, mock_config_entry):
         mock_api.get_token.return_value = "test_token"
         mock_api_class.return_value = mock_api
         
-        with patch("custom_components.smarthub.SmartHubDataUpdateCoordinator"):
+        with patch("custom_components.smarthub.SmartHubDataUpdateCoordinator") as mock_coordinator_cls:
+             mock_coordinator = mock_coordinator_cls.return_value
+             mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+
              with patch("custom_components.smarthub.hass.config_entries.async_forward_entry_setups"):
                 result = await async_setup_entry(mock_hass, mock_config_entry)
                 
