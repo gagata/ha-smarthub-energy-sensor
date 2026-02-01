@@ -26,16 +26,27 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None) -> config_entries.ConfigFlowResult:
         """Handle the initial step."""
+        errors = {}
         if user_input is not None:
-            if self.source == config_entries.SOURCE_RECONFIGURE:
-                return self.async_update_reload_and_abort(
-                    self._get_reconfigure_entry(), data_updates=user_input
+            try:
+                await self._validate_input(user_input)
+            except SmartHubAuthError:
+                errors["base"] = "invalid_auth"
+            except SmartHubConnectionError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                if self.source == config_entries.SOURCE_RECONFIGURE:
+                    return self.async_update_reload_and_abort(
+                        self._get_reconfigure_entry(), data_updates=user_input
+                    )
+                # else - create a new entry
+                return self.async_create_entry(
+                    title="SmartHub",
+                    data=user_input,
                 )
-            # else - create a new entry
-            return self.async_create_entry(
-                title="SmartHub",
-                data=user_input,
-            )
 
         schema_values: dict[str, Any] | MappingProxyType[str, Any] = {}
         if self.source == config_entries.SOURCE_RECONFIGURE:
@@ -63,8 +74,6 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
-        errors = {}
-
         # Show basic form
         return self.async_show_form(
             step_id="user",
@@ -74,6 +83,28 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors
         )
+
+    async def _validate_input(self, data: dict[str, Any]) -> None:
+        """Validate the user input allows us to connect.
+
+        Data has the keys from the schema with values provided by the user.
+        """
+        from .api import SmartHubAPI, SmartHubAuthError, SmartHubConnectionError
+
+        hub = SmartHubAPI(
+            email=data["email"],
+            password=data["password"],
+            account_id=data["account_id"],
+            timezone=data["timezone"],
+            mfa_totp=data.get("mfa_totp", ""),
+            host=data["host"],
+        )
+
+        try:
+            await hub.get_token()
+        finally:
+            await hub.close()
+
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> config_entries.ConfigFlowResult:
         """Handle a reconfiguration config flow initialized by the user."""
