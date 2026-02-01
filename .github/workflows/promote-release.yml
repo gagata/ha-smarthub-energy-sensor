@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to promote (e.g. 2.2.1-alpha)'
-        required: true
+        description: 'Version to promote (e.g. 2.2.1-alpha). Leave empty to use latest tag.'
+        required: false
 
 permissions:
   contents: write
@@ -19,22 +19,36 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
 
-      - name: Validate Version
+      - name: Determine Version
         id: validate
         run: |
           VERSION="${{ inputs.version }}"
+          
+          if [ -z "$VERSION" ]; then
+            echo "No version provided. Fetching latest tag..."
+            VERSION=$(git describe --tags --abbrev=0)
+            echo "Found latest tag: $VERSION"
+          fi
+          
+          # Ensure version ends with -alpha
           if [[ "$VERSION" != *"-alpha" ]]; then
-            echo "Error: Version must end with -alpha"
+            echo "Error: Version to promote ($VERSION) must end with -alpha"
             exit 1
           fi
-          FINAL_VERSION="${VERSION%-alpha}"
+          
+          # Strip 'v' prefix if present for consistency
+          CLEAN_VERSION="${VERSION#v}"
+          
+          # Strip -alpha to get the final version
+          FINAL_VERSION="${CLEAN_VERSION%-alpha}"
+          
           echo "FINAL_VERSION=$FINAL_VERSION" >> $GITHUB_ENV
           echo "Promoting $VERSION to $FINAL_VERSION"
 
       - name: Update Manifest
         run: |
-          # Simple sed replacement for the manifest
-          sed -i 's/"version": "${{ inputs.version }}"/"version": "${{ env.FINAL_VERSION }}"/' custom_components/smarthub/manifest.json
+          # Update manifest using the shared script (overwrites version, no search-replace)
+          python3 .github/scripts/bump_version.py --set-version "${{ env.FINAL_VERSION }}" --write
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
