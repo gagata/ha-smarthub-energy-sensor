@@ -2,7 +2,8 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from .const import DOMAIN
-from .api import SmartHubAPI, SmartHubAuthError, SmartHubConnectionError
+from .api import SmartHubAPI
+from .exceptions import SmartHubAuthenticationError, SmartHubConnectionError
 
 from typing import Any
 import zoneinfo
@@ -31,7 +32,7 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 await self._validate_input(user_input)
-            except SmartHubAuthError:
+            except SmartHubAuthenticationError:
                 errors["base"] = "invalid_auth"
             except SmartHubConnectionError:
                 errors["base"] = "cannot_connect"
