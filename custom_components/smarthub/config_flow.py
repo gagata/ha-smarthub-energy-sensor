@@ -2,6 +2,7 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from .const import DOMAIN
+from .api import SmartHubAPI, SmartHubAuthError, SmartHubConnectionError
 
 from typing import Any
 import zoneinfo
@@ -89,8 +90,6 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         Data has the keys from the schema with values provided by the user.
         """
-        from .api import SmartHubAPI, SmartHubAuthError, SmartHubConnectionError
-
         hub = SmartHubAPI(
             email=data["email"],
             password=data["password"],
