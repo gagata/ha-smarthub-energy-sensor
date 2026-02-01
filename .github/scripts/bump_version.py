@@ -50,8 +50,14 @@ def bump_version(force_major=False):
         json.dump(manifest, f, indent=2)
         f.write("\n") # Add newline at end of file
 
-    print(f"::set-output name=new_version::{new_version_base}")
-    print(f"::set-output name=new_tag::{new_version_tag}")
+    if "GITHUB_OUTPUT" in os.environ:
+        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+            print(f"new_version={new_version_base}", file=fh)
+            print(f"new_tag={new_version_tag}", file=fh)
+    else:
+        print(f"new_version={new_version_base}")
+        print(f"new_tag={new_version_tag}")
+
     print(f"Bumped version to: {manifest['version']}")
 
 if __name__ == "__main__":
