@@ -1,0 +1,25 @@
+name: Test Scripts
+
+on:
+  push:
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/test-scripts.yml'
+  pull_request:
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/test-scripts.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          
+      - name: Run bump_version tests
+        run: python3 .github/scripts/test_bump_version.py
