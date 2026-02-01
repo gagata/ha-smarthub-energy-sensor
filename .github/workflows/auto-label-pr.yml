@@ -12,61 +12,78 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Extract and Apply Labels
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = context.payload.pull_request.body || '';
-            const labelsToAdd = [];
-            
-            // Extract labels based on PR template checkboxes
-            // Check for checked checkboxes (markdown format: - [x] 🛠 Breaking Change)
-            if (body.includes('- [x] 🛠 Breaking Change')) {
-              labelsToAdd.push('breaking');
-            } else if (body.includes('- [x] 🎉 New Feature') || body.includes('feature')) {
-              labelsToAdd.push('feature');
-            } else if (body.includes('- [x] 🐛 Bug Fix') || body.includes('bug')) {
-              labelsToAdd.push('bug');
-            } else if (body.includes('- [x] ⚡ Performance') || body.includes('performance')) {
-              labelsToAdd.push('performance');
-            } else if (body.includes('- [x] 🔧 Maintenance') || body.includes('maintenance')) {
-              labelsToAdd.push('maintenance');
-            }
-            
-            // Add labels if any found
-            if (labelsToAdd.length > 0) {
-              console.log(`Adding labels: ${labelsToAdd.join(', ')}`);
-              
-              // Get existing labels
-              const existingLabels = context.payload.pull_request.labels.map(l => l.name);
-              
-              // Remove any conflicting labels first
-              const conflictingLabels = [];
-              labelsToAdd.forEach(label => {
-                if (existingLabels.includes(label) && !labelsToAdd.includes(label)) {
-                  conflictingLabels.push(label);
-                }
-              });
-              
-              // Remove conflicting labels
-              if (conflictingLabels.length > 0) {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  name: conflictingLabels
-                });
-              }
-              
-              // Add new labels
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                labels: labelsToAdd
-              });
-              
-              console.log(`Applied ${labelsToAdd.length} labels to PR #${context.issue.number}`);
-            } else {
-              console.log('No matching labels found based on PR template');
-            }
+            - name: Extract and Apply Labels
+        
+              uses: actions/github-script@v7
+        
+              with:
+        
+                script: |
+        
+                  const body = context.payload.pull_request.body || '';
+        
+                  const labelsToAdd = [];
+        
+                  
+        
+                  // Regex to match checked boxes, ignoring specific emojis or bold formatting
+        
+                  // Matches: - [x] ... KeyWord ...
+        
+                  
+        
+                  if (/-\s*\[x\]\s*.*Breaking Change/i.test(body)) {
+        
+                    labelsToAdd.push('breaking');
+        
+                  }
+        
+                  if (/-\s*\[x\]\s*.*New Feature/i.test(body)) {
+        
+                    labelsToAdd.push('feature');
+        
+                  }
+        
+                  if (/-\s*\[x\]\s*.*Bug Fix/i.test(body)) {
+        
+                    labelsToAdd.push('bug');
+        
+                  }
+        
+                  if (/-\s*\[x\]\s*.*Performance/i.test(body)) {
+        
+                    labelsToAdd.push('performance');
+        
+                  }
+        
+                  if (/-\s*\[x\]\s*.*Maintenance/i.test(body)) {
+        
+                    labelsToAdd.push('maintenance');
+        
+                  }
+        
+                  
+        
+                  if (labelsToAdd.length > 0) {
+        
+                    console.log(`Adding labels: ${labelsToAdd.join(', ')}`);
+        
+                    await github.rest.issues.addLabels({
+        
+                      owner: context.repo.owner,
+        
+                      repo: context.repo.repo,
+        
+                      issue_number: context.issue.number,
+        
+                      labels: labelsToAdd
+        
+                    });
+        
+                  } else {
+        
+                    console.log('No matching checkboxes found in PR body.');
+        
+                  }
+        
+      
