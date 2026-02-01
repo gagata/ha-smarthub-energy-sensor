@@ -6,6 +6,10 @@
 - [ ] ⚡ **Performance Improvement** (Improves speed/efficiency)
 - [ ] 🔧 **Maintenance** (Code cleanup, docs, dependencies)
 
+## 🚀 Release Strategy
+- [ ] **Force Major Release** (Check this if you want to increment the Major version, e.g., 2024 -> 2025)
+  > *If unchecked, the release version will be automatically determined: Minor bump if it's a new month, otherwise Patch bump.*
+
 ## 📝 Description
 <!-- Clear description of changes -->
 

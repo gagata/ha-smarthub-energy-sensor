@@ -1,0 +1,75 @@
+name: Create Release Candidate
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Bump Version & Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check for Force Major
+        id: check_major
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the PR associated with this commit
+          PR_NUMBER=$(gh pr list --state merged --base master --head "${{ github.event.before }}" --json number --jq '.[0].number')
+          
+          # Fallback: if we can't find by head (e.g. squash merge), try searching for the commit hash
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" == "null" ]; then
+             PR_NUMBER=$(gh pr list --search "${{ github.sha }}" --state merged --json number --jq '.[0].number')
+          fi
+
+          FORCE_MAJOR="false"
+          
+          if [ ! -z "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            echo "Found PR #$PR_NUMBER"
+            BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+            if echo "$BODY" | grep -q "\[x\] Force Major Release"; then
+              FORCE_MAJOR="true"
+              echo "Force Major Release detected in PR body."
+            fi
+          else
+            echo "No PR found for this commit."
+          fi
+          
+          echo "FORCE_MAJOR=$FORCE_MAJOR" >> $GITHUB_ENV
+
+      - name: Bump Version
+        id: bump
+        run: |
+          python3 .github/scripts/bump_version.py
+        env:
+          FORCE_MAJOR: ${{ env.FORCE_MAJOR }}
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/smarthub/manifest.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: Release ${{ steps.bump.outputs.new_tag }}
+          prerelease: true
+          generate_release_notes: true

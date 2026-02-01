@@ -1,0 +1,50 @@
+name: Promote Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote (e.g. 2.2.1-alpha)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Version
+        id: validate
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ "$VERSION" != *"-alpha" ]]; then
+            echo "Error: Version must end with -alpha"
+            exit 1
+          fi
+          FINAL_VERSION="${VERSION%-alpha}"
+          echo "FINAL_VERSION=$FINAL_VERSION" >> $GITHUB_ENV
+          echo "Promoting $VERSION to $FINAL_VERSION"
+
+      - name: Update Manifest
+        run: |
+          # Simple sed replacement for the manifest
+          sed -i 's/"version": "${{ inputs.version }}"/"version": "${{ env.FINAL_VERSION }}"/' custom_components/smarthub/manifest.json
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/smarthub/manifest.json
+          git commit -m "chore: promote to ${{ env.FINAL_VERSION }}"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ env.FINAL_VERSION }}"
+          name: "Release v${{ env.FINAL_VERSION }}"
+          prerelease: false
+          generate_release_notes: true
