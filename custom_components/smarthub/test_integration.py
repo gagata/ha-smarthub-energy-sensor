@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.smarthub import async_setup_entry
 from custom_components.smarthub.api import SmartHubAPI, SmartHubAPIError
@@ -12,7 +13,7 @@ from custom_components.smarthub.const import DOMAIN
 @pytest.fixture
 def mock_config_entry():
     """Create a mock config entry."""
-    return ConfigEntry(
+    return MockConfigEntry(
         version=1,
         domain=DOMAIN,
         title="SmartHub Test",
@@ -102,19 +103,22 @@ async def test_async_setup_entry_success(mock_hass, mock_config_entry):
     """Test successful setup of config entry."""
     with patch("custom_components.smarthub.SmartHubAPI") as mock_api_class:
         mock_api = Mock()
-        mock_api.get_token.return_value = "test_token"
+        mock_api.get_token = AsyncMock(return_value="test_token")
+        mock_api.close = AsyncMock()
         mock_api_class.return_value = mock_api
         
         with patch("custom_components.smarthub.SmartHubDataUpdateCoordinator") as mock_coordinator_cls:
              mock_coordinator = mock_coordinator_cls.return_value
              mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+             
+             # Configure mock_hass to support await
+             mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
 
-             with patch("custom_components.smarthub.hass.config_entries.async_forward_entry_setups"):
-                result = await async_setup_entry(mock_hass, mock_config_entry)
-                
-                assert result is True
-                # In the new code, runtime_data is set on entry
-                assert hasattr(mock_config_entry, "runtime_data")
+             result = await async_setup_entry(mock_hass, mock_config_entry)
+            
+             assert result is True
+             # In the new code, runtime_data is set on entry
+             assert hasattr(mock_config_entry, "runtime_data")
 
 
 @pytest.mark.asyncio
@@ -122,7 +126,8 @@ async def test_async_setup_entry_connection_failure(mock_hass, mock_config_entry
     """Test setup failure due to connection error."""
     with patch("custom_components.smarthub.SmartHubAPI") as mock_api_class:
         mock_api = Mock()
-        mock_api.get_token.side_effect = Exception("Connection failed") # ConfigEntryError wraps generic exception
+        mock_api.get_token = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_api.close = AsyncMock()
         mock_api_class.return_value = mock_api
         
         from homeassistant.exceptions import ConfigEntryError
