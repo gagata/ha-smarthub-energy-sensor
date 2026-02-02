@@ -20,21 +20,18 @@ from .const import (
     ELECTRIC_SERVICE,
     SUPPORTED_SERVICES,
 )
-
-_LOGGER = logging.getLogger(__name__)
-
-class Aggregation(Enum):
-  HOURLY = "HOURLY"
-  MONTHLY = "MONTHLY"
-
-
 from .exceptions import (
     SmartHubAuthenticationError,
     SmartHubConnectionError,
     SmartHubDataError,
     SmartHubError as SmartHubAPIError,
 )
-from .const import (
+
+_LOGGER = logging.getLogger(__name__)
+
+class Aggregation(Enum):
+  HOURLY = "HOURLY"
+  MONTHLY = "MONTHLY"
 
 class SmartHubLocation():
     """Smarthub Location object - contains location_id, location_description, etc"""
