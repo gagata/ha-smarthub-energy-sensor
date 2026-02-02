@@ -254,7 +254,7 @@ class SmartHubAPI:
 
         try:
             session = await self._get_session()
-            async with session.post(auth_url, headers=headers, params=payload) as response:
+            async with session.post(auth_url, headers=headers, data=payload) as response:
                 _ = await response.text()
                 _LOGGER.debug("Auth response status: %s", response.status)
 
