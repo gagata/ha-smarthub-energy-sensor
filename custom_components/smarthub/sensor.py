@@ -42,7 +42,11 @@ except ImportError:
         MIN = "min"
 
 
-from .api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubAuthenticationError, SmartHubLocation
+from .api import Aggregation, SmartHubAPI, SmartHubLocation
+from .exceptions import (
+    SmartHubAuthenticationError,
+    SmartHubError as SmartHubAPIError,
+)
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_KEY,

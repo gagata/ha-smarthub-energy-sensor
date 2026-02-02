@@ -10,7 +10,12 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
-from .api import SmartHubAPI, SmartHubAPIError, SmartHubAuthError, SmartHubConnectionError
+from .api import SmartHubAPI
+from .exceptions import (
+    SmartHubAuthenticationError,
+    SmartHubConnectionError,
+    SmartHubError as SmartHubAPIError,
+)
 from .const import (
     DOMAIN,
     CONF_EMAIL,
@@ -137,7 +142,7 @@ class SmartHubConfigFlow(config_entries.ConfigFlow):
                     data=user_input,
                 )
 
-            except SmartHubAuthError:
+            except SmartHubAuthenticationError:
                 _LOGGER.error("Authentication failed during config flow")
                 errors["base"] = "invalid_auth"
             except SmartHubConnectionError:
