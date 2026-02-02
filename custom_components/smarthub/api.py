@@ -31,9 +31,42 @@ from .utils import sanitize_host
 _LOGGER = logging.getLogger(__name__)
 
 class Aggregation(Enum):
-  HOURLY = "HOURLY"
-  DAILY = "DAILY"
-  MONTHLY = "MONTHLY"
+    HOURLY = "HOURLY"
+    DAILY = "DAILY"
+    MONTHLY = "MONTHLY"
+
+    @property
+    def label(self) -> str:
+        """Return human readable label."""
+        if self == Aggregation.HOURLY:
+            return "Hourly"
+        if self == Aggregation.DAILY:
+            return "Daily"
+        if self == Aggregation.MONTHLY:
+            return "Monthly"
+        return "Unknown"
+
+    @property
+    def suffix(self) -> str:
+        """Return statistic ID suffix."""
+        if self == Aggregation.HOURLY:
+            return ""
+        if self == Aggregation.DAILY:
+            return "_daily"
+        if self == Aggregation.MONTHLY:
+            return "_monthly"
+        return "_unknown"
+
+    @property
+    def period(self) -> str:
+        """Return statistic period."""
+        if self == Aggregation.HOURLY:
+            return "hour"
+        if self == Aggregation.DAILY:
+            return "day"
+        if self == Aggregation.MONTHLY:
+            return "month"
+        return "unknown"
 
 class SmartHubLocation():
     """Smarthub Location object - contains location_id, location_description, etc"""
