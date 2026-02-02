@@ -32,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class Aggregation(Enum):
   HOURLY = "HOURLY"
+  DAILY = "DAILY"
   MONTHLY = "MONTHLY"
 
 class SmartHubLocation():
