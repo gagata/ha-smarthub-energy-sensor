@@ -6,6 +6,7 @@ from .api import SmartHubAPI
 from .exceptions import SmartHubAuthenticationError, SmartHubConnectionError
 
 from typing import Any
+from types import MappingProxyType
 import zoneinfo
 import logging
 from homeassistant.helpers.selector import (
