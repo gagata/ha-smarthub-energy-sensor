@@ -26,6 +26,7 @@ from .exceptions import (
     SmartHubDataError,
     SmartHubError as SmartHubAPIError,
 )
+from .utils import sanitize_host
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class SmartHubAPI:
         self.account_id = account_id
         self.timezone = timezone
         self.mfa_totp = mfa_totp
-        self.host = host
+        self.host = sanitize_host(host)
         self.timeout = timeout
         self.token: Optional[str] = None
         self.primary_username: Optional[str] = None
