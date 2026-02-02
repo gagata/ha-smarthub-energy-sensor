@@ -42,7 +42,7 @@ except ImportError:
         MIN = "min"
 
 
-from .api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubAuthError, SmartHubLocation
+from .api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubAuthenticationError, SmartHubLocation
 from .const import (
     DOMAIN,
     ENERGY_SENSOR_KEY,
@@ -148,7 +148,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
 
             return entity_response
 
-        except SmartHubAuthError as e:
+        except SmartHubAuthenticationError as e:
             _LOGGER.error("Authentication error fetching SmartHub data: %s", e)
             # For auth errors, we want to raise UpdateFailed to trigger retry
             # but also ensure the API will refresh authentication on next attempt

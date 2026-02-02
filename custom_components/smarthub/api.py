@@ -28,20 +28,13 @@ class Aggregation(Enum):
   MONTHLY = "MONTHLY"
 
 
-class SmartHubAPIError(Exception):
-    """Base exception for SmartHub API errors."""
-
-
-class SmartHubAuthError(SmartHubAPIError):
-    """Authentication error."""
-
-
-class SmartHubConnectionError(SmartHubAPIError):
-    """Connection error."""
-
-
-class SmartHubDataError(SmartHubAPIError):
-    """Data parsing error."""
+from .exceptions import (
+    SmartHubAuthenticationError,
+    SmartHubConnectionError,
+    SmartHubDataError,
+    SmartHubError as SmartHubAPIError,
+)
+from .const import (
 
 class SmartHubLocation():
     """Smarthub Location object - contains location_id, location_description, etc"""
@@ -205,7 +198,7 @@ class SmartHubAPI:
             The authentication token.
 
         Raises:
-            SmartHubAuthError: If authentication fails.
+            SmartHubAuthenticationError: If authentication fails.
             SmartHubConnectionError: If there's a connection error.
         """
         auth_url = f"https://{self.host}/services/oauth/auth/v2"
@@ -234,7 +227,7 @@ class SmartHubAPI:
                 _LOGGER.debug("Auth response status: %s", response.status)
 
                 if response.status == 401:
-                    raise SmartHubAuthError("Invalid credentials")
+                    raise SmartHubAuthenticationError("Invalid credentials")
                 elif response.status != 200:
                     raise SmartHubConnectionError(
                         f"Authentication failed with HTTP status: {response.status}"
@@ -249,7 +242,7 @@ class SmartHubAPI:
                 self.primary_username = response_json.get("primaryUsername", self.email)
 
                 if not self.token:
-                    raise SmartHubAuthError("No authorization token in response")
+                    raise SmartHubAuthenticationError("No authorization token in response")
 
                 _LOGGER.debug("Successfully retrieved authentication token")
                 return self.token
@@ -290,7 +283,7 @@ class SmartHubAPI:
                 _LOGGER.debug("User Data response status: %s", response.status)
 
                 if response.status == 401:
-                    raise SmartHubAuthError("Invalid credentials")
+                    raise SmartHubAuthenticationError("Invalid credentials")
                 elif response.status != 200:
                     raise SmartHubConnectionError(
                         f"User_data request failed with HTTP status: {response.status}"
@@ -431,7 +424,7 @@ class SmartHubAPI:
                             continue
                         else:
                             # Already tried refreshing, this is a persistent auth issue
-                            raise SmartHubAuthError("Authentication failed after token refresh")
+                            raise SmartHubAuthenticationError("Authentication failed after token refresh")
                     elif response.status != 200:
                         error_text = await response.text()
                         _LOGGER.warning("HTTP error %d: %s", response.status, error_text)
@@ -461,7 +454,7 @@ class SmartHubAPI:
                         _LOGGER.warning("Unexpected status in response: %s", status)
                         return None
 
-            except SmartHubAuthError:
+            except SmartHubAuthenticationError:
                 # Re-raise auth errors immediately
                 raise
             except ClientError as e:
