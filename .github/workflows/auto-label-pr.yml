@@ -2,6 +2,11 @@ name: Auto-Label Pull Request
 on:
   pull_request_target:
     types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      target_pr:
+        description: 'PR number to label (optional). If empty, uses the PR in the event payload.'
+        required: false
 
 jobs:
   auto-label:
@@ -15,7 +20,27 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const body = context.payload.pull_request.body || '';
+            const inputPr = context.payload.inputs ? context.payload.inputs.target_pr : null;
+            const prNumber = inputPr ? parseInt(inputPr, 10) : (context.payload.pull_request ? context.payload.pull_request.number : null);
+            
+            if (!prNumber) {
+              console.error('No PR number found in payload or inputs');
+              return;
+            }
+
+            let body = '';
+            if (inputPr) {
+              console.log(`Fetching body for PR #${prNumber}...`);
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+              body = pullRequest.body || '';
+            } else {
+              body = context.payload.pull_request.body || '';
+            }
+
             const labelsToAdd = [];
             
             // Regex to match checked boxes, ignoring specific emojis or bold formatting
@@ -26,13 +51,13 @@ jobs:
             if (/-\s*\[x\]\s*.*Maintenance/i.test(body))     labelsToAdd.push('maintenance');
             
             if (labelsToAdd.length > 0) {
-              console.log(`Adding labels: ${labelsToAdd.join(', ')}`);
+              console.log(`Adding labels to PR #${prNumber}: ${labelsToAdd.join(', ')}`);
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number: prNumber,
                 labels: labelsToAdd
               });
             } else {
-              console.log('No matching checkboxes found in PR body.');
+              console.log(`No matching checkboxes found in PR #${prNumber} body.`);
             }
