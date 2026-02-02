@@ -10,12 +10,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
       - name: Extract and Apply Labels
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.BOT_TOKEN }}
           script: |
             const body = context.payload.pull_request.body || '';
             const labelsToAdd = [];
