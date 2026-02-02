@@ -9,7 +9,6 @@ from homeassistant.data_entry_flow import FlowResultType
 from custom_components.smarthub.const import DOMAIN
 from custom_components.smarthub.exceptions import SmartHubAuthenticationError, SmartHubConnectionError
 
-@pytest.mark.asyncio
 async def test_form(hass: HomeAssistant) -> None:
     """Test we get the form."""
     result = await hass.config_entries.flow.async_init(
@@ -52,7 +51,6 @@ async def test_form(hass: HomeAssistant) -> None:
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-@pytest.mark.asyncio
 async def test_form_invalid_auth(hass: HomeAssistant) -> None:
     """Test we handle invalid auth."""
     result = await hass.config_entries.flow.async_init(
@@ -81,7 +79,6 @@ async def test_form_invalid_auth(hass: HomeAssistant) -> None:
     assert result2["errors"] == {"base": "invalid_auth"}
 
 
-@pytest.mark.asyncio
 async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     """Test we handle cannot connect error."""
     result = await hass.config_entries.flow.async_init(
@@ -110,7 +107,6 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     assert result2["errors"] == {"base": "cannot_connect"}
 
 
-@pytest.mark.asyncio
 async def test_form_unknown_exception(hass: HomeAssistant) -> None:
     """Test we handle unknown exception."""
     result = await hass.config_entries.flow.async_init(

@@ -30,4 +30,4 @@ jobs:
           fi
       - name: Run tests
         run: |
-          python -m pytest custom_components/smarthub/test_integration.py
+          python -m pytest tests/
