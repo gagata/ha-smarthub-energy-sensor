@@ -341,11 +341,18 @@ class SmartHubAPI:
                     for service_description in service_descriptions:
                       # for now only support electric service type
                       if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
+                        # Try to find a good description
+                        description = service_description.get("description")
+                        if not description or description == "unknown":
+                            description = service_description.get("address")
+                        if not description:
+                            description = service_description.get("id", "unknown")
+
                         locations.append(
                           SmartHubLocation(
                             id=location_id,
                             service=ELECTRIC_SERVICE,
-                            description=service_description.get("description", "unknown"),
+                            description=description,
                           )
                         )
 
