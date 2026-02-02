@@ -1,5 +1,7 @@
 name: Auto-Label Pull Request
 on:
+  pull_request:
+    types: [opened, edited]
   pull_request_target:
     types: [opened, edited]
   workflow_dispatch:
@@ -11,6 +13,13 @@ on:
 jobs:
   auto-label:
     runs-on: ubuntu-latest
+    # Prevent duplicate runs: 
+    # Only run pull_request_target if it's from a fork.
+    # Only run pull_request if it's NOT from a fork.
+    if: |
+      (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      github.event_name == 'workflow_dispatch'
     permissions:
       pull-requests: write
       issues: write
@@ -29,8 +38,8 @@ jobs:
             }
 
             let body = '';
-            if (inputPr) {
-              console.log(`Fetching body for PR #${prNumber}...`);
+            if (inputPr || github.event_name === 'pull_request_target') {
+              console.log(`Fetching body for PR #${prNumber} from API...`);
               const { data: pullRequest } = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -43,7 +52,6 @@ jobs:
 
             const labelsToAdd = [];
             
-            // Regex to match checked boxes, ignoring specific emojis or bold formatting
             if (/-\s*\[x\]\s*.*Breaking Change/i.test(body)) labelsToAdd.push('breaking');
             if (/-\s*\[x\]\s*.*New Feature/i.test(body))     labelsToAdd.push('feature');
             if (/-\s*\[x\]\s*.*Bug Fix/i.test(body))         labelsToAdd.push('bug');
