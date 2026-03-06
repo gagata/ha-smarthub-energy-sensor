@@ -435,7 +435,7 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
                 attributes[ATTR_LAST_READING_TIME] = last_reading
 
             meter_name = self.coordinator.data.get(self.location.id).get(METER_NAME)
-            if last_reading:
+            if meter_name:
                 attributes[METER_NAME] = meter_name
 
         return attributes

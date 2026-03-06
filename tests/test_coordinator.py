@@ -133,8 +133,6 @@ async def test_coordinator_first_run_forward_meter(
         None,
         {"state", "sum"},
     )
-    print("FFOOO")
-    print(stats)
 
     # The first hour's statistics summary is...
     assert stats["smarthub:smarthub_energy_sensor_daily_123456_11111"][0]["sum"] == 111.0
