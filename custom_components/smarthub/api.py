@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional, List
-from enum import Enum
+from enum import StrEnum
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
@@ -27,16 +27,16 @@ from .exceptions import (
     SmartHubDataError,
     SmartHubError as SmartHubAPIError,
 )
-from .utils import sanitize_host
+from .utils import sanitize_host, parse_epoch_set_timezone
 
 _LOGGER = logging.getLogger(__name__)
 
-class ParseType(Enum):
+class ParseType(StrEnum):
     FORWARD = "FORWARD"
     NET = "NET"
     RETURN = "RETURN"
 
-class Aggregation(Enum):
+class Aggregation(StrEnum):
     HOURLY = "HOURLY"
     DAILY = "DAILY"
     MONTHLY = "MONTHLY"
@@ -123,7 +123,8 @@ class SmartHubAPI:
         parsed_data = []
         _LOGGER.debug(f"First 10 entries of usage data: {usage_data[:10]}")
         for usage in usage_data:
-            event_time = datetime.fromtimestamp(usage.get("x") / 1000.0, tz=timezone.utc).replace(tzinfo=ZoneInfo(self.timezone)) # convert microseconds to timestmap -> read data as if it was in provider TZ, then conver to UTC for statistics
+            # convert microseconds to timestmap -> read data as if it was in provider TZ
+            event_time = parse_epoch_set_timezone(usage.get("x") / 1000.0, ZoneInfo(self.timezone))
             # HA stats import wants timestamps only at standard intervals -
             # https://github.com/home-assistant/core/blob/4fef19c7bc7c1f7be827f6c489ad1df232e44906/homeassistant/components/recorder/statistics.py#L2634
              # If the first entry isn't aligned with the top of the hour - treat it as if it was
@@ -203,7 +204,7 @@ class SmartHubAPI:
             for entry in electric_data:
                 # Find the entry with type "USAGE"
                 if entry.get("type","") == "USAGE":
-                    _LOGGER.debug("Usage: ", entry)
+                    _LOGGER.debug("Usage: %s", entry)
 
                     meters = entry.get("meters", [])
                     forward_series = ""
@@ -213,15 +214,16 @@ class SmartHubAPI:
                       _LOGGER.warning("More then 2 meters in usage data: %s", meters)
                     for meter in meters:
                       # assume forward is default if not present
-                      flow_direction = meter.get("flowDirection","FORWARD")
-                      if flow_direction == "FORWARD":
-                        forward_series= meter["seriesId"]
-                      elif flow_direction == "NET":
-                        net_series= meter["seriesId"]
-                      elif flow_direction == "RETURN":
-                        return_series= meter["seriesId"]
-                      else:
-                        _LOGGER.warning("Unknown flow direction in meter: %s", meter)
+                      flow_direction = meter.get("flowDirection", ParseType.FORWARD)
+                      match flow_direction:
+                        case ParseType.FORWARD:
+                          forward_series = meter["seriesId"]
+                        case ParseType.NET:
+                          net_series = meter["seriesId"]
+                        case ParseType.RETURN:
+                          return_series = meter["seriesId"]
+                        case _:
+                          _LOGGER.warning("Unknown flow direction in meter: %s", meter)
 
                     series = entry.get("series", [])
                     for serie in series:
