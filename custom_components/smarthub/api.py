@@ -231,7 +231,6 @@ class SmartHubAPI:
                             usage_data = serie.get("data", [])
                             parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.RETURN)
                             _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
-                            print("RETURN_METER ", parsed_response["USAGE_RETURN"])
 
                         # If there is a NetMeter, use that for both Return and Usage (as it combines both).
                         # NOTE - there must always be a FORWARD or NET meter - or the "USAGE" is not being returned.
@@ -247,7 +246,7 @@ class SmartHubAPI:
                               parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.NET)
                               _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
                 else:
-                    _LOGGER.debug("Unknown Usage: ", entry)
+                    _LOGGER.debug("Unknown Usage: %s", entry)
 
             return parsed_response
 
@@ -255,6 +254,75 @@ class SmartHubAPI:
             _LOGGER.error("Error parsing usage data: %s", data)
             raise SmartHubDataError(f"Error parsing usage data: {e}") from e
 
+    def parse_locations(self, location_json) -> List[SmartHubLocation]:
+        # Response format is structured as a list of dictionaries -
+        # each dictionary has the following keys
+        #   "account",
+        #   "additionalCustomerName",
+        #   "address",
+        #   "agreementStatus",
+        #   "consumerClassCode",
+        #   "customer",
+        #   "customerName",
+        #   "disconnectNonPay",
+        #   "email",
+        #   "inactive",
+        #   "invoiceGroupNumber",
+        #   "isAutoPay",
+        #   "isDisconnected",
+        #   "isMultiService",
+        #   "isPendingDisconnect",
+        #   "isUnCollectible",
+        #   "primaryServiceLocationId",
+        #   "providerOrServiceDescription",
+        #   "providerToDescription",
+        #   "providerToProviderDescription",
+        #   "serviceLocationIdToServiceLocationSummary",
+        #   "serviceLocationToIndustries",
+        #   "serviceLocationToProviders",
+        #   "serviceLocationToUserDataServiceLocationSummaries",
+        #   "serviceToProviders",
+        #   "serviceToServiceDescription",
+        #   "services"
+        # `serviceLocationToUserDataServiceLocationSummaries` Includes human readable information about the service location.
+        # Which is a map of the location_id, to a list of
+          #  "activeRateSchedules",
+          #  "address",
+          #  "description",
+          #  "id",
+          #  "lastBillPresReadDtTm",
+          #  "lastBillPrevReadDtTm",
+          #  "location",
+          #  "serviceStatus",
+          #  "services"
+
+        locations = []
+        _LOGGER.debug(location_json)
+
+        for entry in location_json:
+          electrical_providers = entry.get("serviceToProviders", {}).get(ELECTRIC_SERVICE,["unknown"])
+          providerOrServiceDescription = entry.get("providerToDescription",{})
+          electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
+          for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
+            for service_description in service_descriptions:
+              # for now only support electric service type
+              if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
+                # Try to find a good description
+                description = service_description.get("description", "")
+
+                if entry.get("inactive", False): # assume active by default
+                  continue # Don't include inactive accounts in list
+
+                locations.append(
+                  SmartHubLocation(
+                    id=location_id,
+                    service=ELECTRIC_SERVICE,
+                    description=description,
+                    provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
+                  )
+                )
+
+        return locations
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session."""
@@ -410,76 +478,7 @@ class SmartHubAPI:
                 except Exception as e:
                     raise SmartHubDataError(f"Invalid JSON response: {e}") from e
 
-                # Response format is structured as a list of dictionaries -
-                # each dictionary has the following keys
-                #   "account",
-                #   "additionalCustomerName",
-                #   "address",
-                #   "agreementStatus",
-                #   "consumerClassCode",
-                #   "customer",
-                #   "customerName",
-                #   "disconnectNonPay",
-                #   "email",
-                #   "inactive",
-                #   "invoiceGroupNumber",
-                #   "isAutoPay",
-                #   "isDisconnected",
-                #   "isMultiService",
-                #   "isPendingDisconnect",
-                #   "isUnCollectible",
-                #   "primaryServiceLocationId",
-                #   "providerOrServiceDescription",
-                #   "providerToDescription",
-                #   "providerToProviderDescription",
-                #   "serviceLocationIdToServiceLocationSummary",
-                #   "serviceLocationToIndustries",
-                #   "serviceLocationToProviders",
-                #   "serviceLocationToUserDataServiceLocationSummaries",
-                #   "serviceToProviders",
-                #   "serviceToServiceDescription",
-                #   "services"
-                # `serviceLocationToUserDataServiceLocationSummaries` Includes human readable information about the service location.
-                # Which is a map of the location_id, to a list of
-                  #  "activeRateSchedules",
-                  #  "address",
-                  #  "description",
-                  #  "id",
-                  #  "lastBillPresReadDtTm",
-                  #  "lastBillPrevReadDtTm",
-                  #  "location",
-                  #  "serviceStatus",
-                  #  "services"
-
-                locations = []
-                _LOGGER.debug(response_json)
-
-                for entry in response_json:
-                  electrical_providers = entry.get("serviceToProviders", {}).get(ELECTRIC_SERVICE,["unknown"])
-                  providerOrServiceDescription = entry.get("providerToDescription",{})
-                  electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
-                  for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
-                    for service_description in service_descriptions:
-                      # for now only support electric service type
-                      if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
-                        # Try to find a good description
-                        description = service_description.get("description", "")
-                        if not description or description == "unknown":
-                            description = ""
-
-                        if entry.get("inactive", False): # assume active by default
-                          continue ; # Don't include inactive accounts in list
-
-                        locations.append(
-                          SmartHubLocation(
-                            id=location_id,
-                            service=ELECTRIC_SERVICE,
-                            description=description,
-                            provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
-                          )
-                        )
-
-                return locations
+                return self.parse_locations(response_json)
 
         except ClientError as e:
             raise SmartHubConnectionError(f"Connection error during User_data request: {e}") from e

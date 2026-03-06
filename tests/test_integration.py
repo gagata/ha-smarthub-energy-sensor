@@ -6,8 +6,8 @@ from homeassistant.config_entries import ConfigEntry
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.smarthub import async_setup_entry
-from custom_components.smarthub.api import SmartHubAPI, SmartHubAPIError
-from custom_components.smarthub.const import DOMAIN
+from custom_components.smarthub.api import SmartHubAPI, SmartHubAPIError, SmartHubLocation
+from custom_components.smarthub.const import DOMAIN, ELECTRIC_SERVICE
 
 
 @pytest.fixture
@@ -192,6 +192,70 @@ def test_parse_usage_no_data(api_instance):
     # Returns parsed_response. So it returns {}.
     assert result == {}
 
+def test_parse_locations(api_instance):
+    """Test parsing location description."""
+    test_data = [
+      {
+        'customer': 'XXXXXXXX', 'customerName': 'CUSTOMER_NAME', 'additionalCustomerName': 'ADDITIONAL_CUSTOMER_NAME', 'account': 'ACCOUNT', 'address': 'ADDRESS, CITY, STATE ZIP_CODE', 'email': 'USER_ID', 'inactive': False, 'primaryServiceLocationId': 'LOCATION_ID',
+        'serviceLocationIdToServiceLocationSummary': {
+        'LOCATION_ID': {
+           'id': {'srvLocNbr': "LOCATION_ID", 'serviceLocation': 'LOCATION_ID'},
+           'location': 'YYYYYY',
+           'address': {'addr1': 'ADDRESS', 'city': 'CITY', 'state': 'STATE', 'zip': 'ZIP_CODE'},
+           'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765774800000, 'lastBillPresReadDtTm': 1768453200000,
+           'meterNumbersToExternalMeterBaseIds': {'350017381': 'LOCATION_ID+1'},
+           'activeRateSchedules': ['1ARC:NOVEC', '1ARG:NOVEC', '1ARN:NOVEC']}
+        },
+       'serviceLocationToUserDataServiceLocationSummaries': {
+         'LOCATION_ID': [
+           {'services': ['ELEC'], 'id': {'srvLocNbr': "LOCATION_ID", 'serviceLocation': 'LOCATION_ID'},
+           'location': 'YYYYYY',
+           'address': {'addr1': 'ADDRESS', 'city': 'CITY', 'state': 'STATE', 'zip': 'ZIP_CODE'},
+           'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765774800000, 'lastBillPresReadDtTm': 1768453200000,
+           'activeRateSchedules': ['1ARC:NOVEC', '1ARG:NOVEC', '1ARN:NOVEC']}
+        ]},
+        'serviceLocationToIndustries': {'LOCATION_ID': ['ELECTRIC']},
+        'providerToDescription': {'NOVEC': 'NOVEC Electric Service'}, 'providerToProviderDescription': {'NOVEC': 'NOVEC Electric Service'}, 'serviceToServiceDescription': {'ELEC': 'Electric Service'},
+        'serviceToProviders': {'ELEC': ['NOVEC']}, 'serviceLocationToProviders': {"LOCATION_ID": ['NOVEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'NOVEC Electric Service', 'services': ['ELEC']
+      },
+      {
+        'customer': 'XXXXXX1', 'customerName': 'CUSTOMER2', 'additionalCustomerName': 'CUSTOMER2 DISPLAY NAME', 'account': 'ACCOUNT1', 'address': 'ADDRESS, CITY, STATE ZIP_CODE', 'email': 'USER_ID', 'inactive': False, 'primaryServiceLocationId': 'LOCATION_ID2',
+        'serviceLocationIdToServiceLocationSummary': {
+          'LOCATION_ID2': {
+            'id': {'srvLocNbr': 'LOCATION_ID2', 'serviceLocation': 'LOCATION_ID2'},
+            'location': 'LOCATION_ID2b',
+            'description': 'NICKNAME',
+            'address': {'addr1': 'XXXXXX', 'city': 'YYYY', 'state': 'ZZZZ', 'zip': 'RRRRR', 'description': 'NICKNAME'},
+            'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765688400000, 'lastBillPresReadDtTm': 1768366800000,
+            'meterNumbersToExternalMeterBaseIds': {'LOCATION_ID2?': 'LOCATION_ID2+1'}, 'activeRateSchedules': ['RES01:1ELEC']}},
+            'serviceLocationToUserDataServiceLocationSummaries': {
+              'LOCATION_ID2': [
+                {'services': ['ELEC'], 'id': {'srvLocNbr': 'LOCATION_ID2', 'serviceLocation': 'LOCATION_ID2'}, 'location': 'LOCATION_ID2b', 'description': 'NICKNAME',
+                 'address': {'addr1': 'XXXXXX', 'city': 'YYYY', 'state': 'ZZZZ', 'zip': 'RRRRR', 'description': 'NICKNAME'}, 'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765688400000, 'lastBillPresReadDtTm': 1768366800000, 'activeRateSchedules': ['RES01:1ELEC']}]},
+            'serviceLocationToIndustries': {'LOCATION_ID2': ['ELECTRIC']},
+            'providerToDescription': {'1ELEC': 'Electric Service'}, 'providerToProviderDescription': {'1ELEC': 'Electric Service'}, 'serviceToServiceDescription': {'ELEC': 'Electric Service'}, 'serviceToProviders': {'ELEC': ['1ELEC']}, 'serviceLocationToProviders': {'LOCATION_ID2': ['1ELEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'Electric Service', 'services': ['ELEC']}
+    ]
+
+    result = api_instance.parse_locations(test_data)
+    expected_locations = [
+      SmartHubLocation(
+        id="LOCATION_ID",
+        service=ELECTRIC_SERVICE,
+        description="",
+        provider="NOVEC Electric Service",
+      ),
+      SmartHubLocation(
+        id="LOCATION_ID2",
+        service=ELECTRIC_SERVICE,
+        description="NICKNAME",
+        provider="Electric Service",
+      ),
+    ]
+
+    assert len(result) == len(expected_locations)
+    for a,b in zip(result, expected_locations):
+      compare_SmartHubLocation(a,b)
+
 def test_parse_usage_no_usage(api_instance):
     """Test parsing when no usage data is available."""
     test_data = {
@@ -280,3 +344,11 @@ def test_smarthub_api_basic_functionality():
     assert api.mfa_totp == "123456"
     assert api.host == "test.smarthub.coop"
     assert api.token is None
+
+def compare_SmartHubLocation(a: SmartHubLocation, b: SmartHubLocation):
+    """comprae two SmartHubLocation objects."""
+    # Test that API object is created correctly
+    assert a.id == b.id
+    assert a.service == b.service
+    assert a.description == b.description
+    assert a.provider == b.provider
