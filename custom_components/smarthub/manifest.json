@@ -15,5 +15,5 @@
     "aiohttp>=3.8.0",
     "pyotp"
   ],
-  "version": "0.0.0-unset"
+  "version": "2.0.4"
 }
