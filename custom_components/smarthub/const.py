@@ -33,5 +33,5 @@ LOCATION_KEY = "location"
 METER_NAME   = "meter_name"
 
 # List of supported services provided by the smarthub endpoint
-ELECTRIC_SERVICE = "ELEC"
+ELECTRIC_SERVICE = "Electric Service"
 SUPPORTED_SERVICES = [ELECTRIC_SERVICE]

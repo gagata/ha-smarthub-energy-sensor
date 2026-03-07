@@ -215,7 +215,8 @@ def test_parse_locations(api_instance):
            'activeRateSchedules': ['1ARC:NOVEC', '1ARG:NOVEC', '1ARN:NOVEC']}
         ]},
         'serviceLocationToIndustries': {'LOCATION_ID': ['ELECTRIC']},
-        'providerToDescription': {'NOVEC': 'NOVEC Electric Service'}, 'providerToProviderDescription': {'NOVEC': 'NOVEC Electric Service'}, 'serviceToServiceDescription': {'ELEC': 'Electric Service'},
+        'providerToDescription': {'NOVEC': 'NOVEC Electric Service'}, 'providerToProviderDescription': {'NOVEC': 'NOVEC Electric Service'},
+        'serviceToServiceDescription': {'ELEC': 'Electric Service'},
         'serviceToProviders': {'ELEC': ['NOVEC']}, 'serviceLocationToProviders': {"LOCATION_ID": ['NOVEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'NOVEC Electric Service', 'services': ['ELEC']
       },
       {
@@ -227,13 +228,49 @@ def test_parse_locations(api_instance):
             'description': 'NICKNAME',
             'address': {'addr1': 'XXXXXX', 'city': 'YYYY', 'state': 'ZZZZ', 'zip': 'RRRRR', 'description': 'NICKNAME'},
             'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765688400000, 'lastBillPresReadDtTm': 1768366800000,
-            'meterNumbersToExternalMeterBaseIds': {'LOCATION_ID2?': 'LOCATION_ID2+1'}, 'activeRateSchedules': ['RES01:1ELEC']}},
-            'serviceLocationToUserDataServiceLocationSummaries': {
-              'LOCATION_ID2': [
-                {'services': ['ELEC'], 'id': {'srvLocNbr': 'LOCATION_ID2', 'serviceLocation': 'LOCATION_ID2'}, 'location': 'LOCATION_ID2b', 'description': 'NICKNAME',
-                 'address': {'addr1': 'XXXXXX', 'city': 'YYYY', 'state': 'ZZZZ', 'zip': 'RRRRR', 'description': 'NICKNAME'}, 'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765688400000, 'lastBillPresReadDtTm': 1768366800000, 'activeRateSchedules': ['RES01:1ELEC']}]},
-            'serviceLocationToIndustries': {'LOCATION_ID2': ['ELECTRIC']},
-            'providerToDescription': {'1ELEC': 'Electric Service'}, 'providerToProviderDescription': {'1ELEC': 'Electric Service'}, 'serviceToServiceDescription': {'ELEC': 'Electric Service'}, 'serviceToProviders': {'ELEC': ['1ELEC']}, 'serviceLocationToProviders': {'LOCATION_ID2': ['1ELEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'Electric Service', 'services': ['ELEC']}
+            'meterNumbersToExternalMeterBaseIds': {'LOCATION_ID2?': 'LOCATION_ID2+1'},
+            'activeRateSchedules': ['RES01:1ELEC']
+            }
+         },
+        'serviceLocationToUserDataServiceLocationSummaries': {
+          'LOCATION_ID2': [
+            {'services': ['ELEC'], 'id': {'srvLocNbr': 'LOCATION_ID2', 'serviceLocation': 'LOCATION_ID2'}, 'location': 'LOCATION_ID2b', 'description': 'NICKNAME',
+             'address': {'addr1': 'XXXXXX', 'city': 'YYYY', 'state': 'ZZZZ', 'zip': 'RRRRR', 'description': 'NICKNAME'}, 'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765688400000, 'lastBillPresReadDtTm': 1768366800000,
+             'activeRateSchedules': ['RES01:1ELEC']
+            }]
+         },
+        'serviceLocationToIndustries': {'LOCATION_ID2': ['ELECTRIC']},
+        'providerToDescription': {'1ELEC': 'Electric Service'}, 'providerToProviderDescription': {'1ELEC': 'Electric Service'},
+        'serviceToServiceDescription': {'ELEC': 'Electric Service'},
+        'serviceToProviders': {'ELEC': ['1ELEC']}, 'serviceLocationToProviders': {'LOCATION_ID2': ['1ELEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'Electric Service', 'services': ['ELEC']
+      },
+      {
+          "customer": "********", "customerName": "****** * *****", "additionalCustomerName": "********* * *****", "account": "*********", "address": "*** ******* ****** ** *, ****, ** *****", "email": "***.*****@**.***", "inactive": False, "primaryServiceLocationId": "*******",
+          "serviceLocationIdToServiceLocationSummary": {
+            "*******": {
+              "id": {"srvLocNbr": "*******", "serviceLocation": "*******" },
+              "location": "**********",
+              "address": { "addr1": "*** ******* ****** ** *", "city": "****", "state": "**", "zip": "*****"},
+              "serviceStatus": "ACTIVE", "lastBillPrevReadDtTm": 1766124000000, "lastBillPresReadDtTm": 1768802400000,
+              "meterNumbersToExternalMeterBaseIds": { "*******": "*******+1"},
+              "activeRateSchedules": [ "RES1:TCEC"]
+            }
+          },
+          "serviceLocationToUserDataServiceLocationSummaries": {
+            "*******": [
+              { "services": ["1ELEC"],"id": {"srvLocNbr": "*******","serviceLocation": "*******"}, "location": "**********",
+                "address": {"addr1": "*** ******* ****** ** *", "city": "****", "state": "**", "zip": "*****"}, "serviceStatus": "ACTIVE", "lastBillPrevReadDtTm": 1766124000000, "lastBillPresReadDtTm": 1768802400000,
+                "activeRateSchedules": ["RES1:TCEC"]
+              }]
+          },
+          "serviceLocationToIndustries": {"*******": ["ELECTRIC"]},
+          "providerToDescription": {"TCEC": "Electric Service"},
+          "providerToProviderDescription": {"TCEC": "Electric Service"},
+          "serviceToServiceDescription": {"1ELEC": "Electric Service"},
+          "serviceToProviders": {"1ELEC": ["TCEC"]},
+          "serviceLocationToProviders": {"*******": ["TCEC"]}, "consumerClassCode": "", "providerOrServiceDescription": "Electric Service",
+          "services": ["1ELEC"]
+        }
     ]
 
     result = api_instance.parse_locations(test_data)
@@ -248,6 +285,12 @@ def test_parse_locations(api_instance):
         id="LOCATION_ID2",
         service=ELECTRIC_SERVICE,
         description="NICKNAME",
+        provider="Electric Service",
+      ),
+      SmartHubLocation(
+        id="*******",
+        service=ELECTRIC_SERVICE,
+        description="",
         provider="Electric Service",
       ),
     ]

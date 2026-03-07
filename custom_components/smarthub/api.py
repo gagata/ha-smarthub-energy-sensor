@@ -300,27 +300,36 @@ class SmartHubAPI:
         _LOGGER.debug(location_json)
 
         for entry in location_json:
-          electrical_providers = entry.get("serviceToProviders", {}).get(ELECTRIC_SERVICE,["unknown"])
-          providerOrServiceDescription = entry.get("providerToDescription",{})
-          electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
-          for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
-            for service_description in service_descriptions:
-              # for now only support electric service type
-              if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
-                # Try to find a good description
-                description = service_description.get("description", "")
 
-                if entry.get("inactive", False): # assume active by default
-                  continue # Don't include inactive accounts in list
+          electric_service_keys = []
+          # Loop through the locations looking for the service description `ELECTRIC_SERVICE` which maps the service key - usually ELEC, but sometimes 1ELEC
+          serviceToServiceDescription = entry.get("serviceToServiceDescription",{'ELEC': 'Electric Service'})
+          for service, serviceDescription in serviceToServiceDescription.items():
+            if serviceDescription == ELECTRIC_SERVICE:
+              electric_service_keys.append(service)
 
-                locations.append(
-                  SmartHubLocation(
-                    id=location_id,
-                    service=ELECTRIC_SERVICE,
-                    description=description,
-                    provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
-                  )
-                )
+          for electric_service in electric_service_keys:
+              electrical_providers = entry.get("serviceToProviders", {}).get(electric_service,["unknown"])
+              providerOrServiceDescription = entry.get("providerToDescription",{})
+              electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
+              for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
+                for service_description in service_descriptions:
+                  # for now only support electric service type
+                  if any(service in [electric_service] for service in service_description.get("services",[])):
+                    # Try to find a good description
+                    description = service_description.get("description", "")
+
+                    if entry.get("inactive", False): # assume active by default
+                      continue # Don't include inactive accounts in list
+
+                    locations.append(
+                      SmartHubLocation(
+                        id=location_id,
+                        service=ELECTRIC_SERVICE,
+                        description=description,
+                        provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
+                      )
+                    )
 
         return locations
 
