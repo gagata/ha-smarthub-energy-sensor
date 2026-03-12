@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pytest-homeassistant-custom-component psutil-home-assistant fnv-hash-fast ulid-transform
+          pip install pytest 'pytest-asyncio>=0.21' 'homeassistant>=2025.11' pytest-homeassistant-custom-component psutil-home-assistant fnv-hash-fast ulid-transform
           pip install -r requirements.txt || true
           if [ -f custom_components/smarthub/manifest.json ]; then
             pip install $(jq -r '.requirements[]' custom_components/smarthub/manifest.json)

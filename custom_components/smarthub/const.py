@@ -28,6 +28,7 @@ ATTR_LAST_READING_TIME = "last_reading_time"
 ATTR_ACCOUNT_ID = "account_id"
 ATTR_LOCATION_ID = "location_id"
 LOCATION_KEY = "location"
+METER_NAME   = "meter_name"
 
 # List of supported services provided by the smarthub endpoint
 ELECTRIC_SERVICE = "ELEC"

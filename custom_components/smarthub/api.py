@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional, List
-from enum import Enum
+from enum import StrEnum
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
@@ -19,6 +19,7 @@ from .const import (
     SESSION_TIMEOUT,
     ELECTRIC_SERVICE,
     SUPPORTED_SERVICES,
+    METER_NAME,
 )
 from .exceptions import (
     SmartHubAuthenticationError,
@@ -26,11 +27,16 @@ from .exceptions import (
     SmartHubDataError,
     SmartHubError as SmartHubAPIError,
 )
-from .utils import sanitize_host
+from .utils import sanitize_host, parse_epoch_set_timezone
 
 _LOGGER = logging.getLogger(__name__)
 
-class Aggregation(Enum):
+class ParseType(StrEnum):
+    FORWARD = "FORWARD"
+    NET = "NET"
+    RETURN = "RETURN"
+
+class Aggregation(StrEnum):
     HOURLY = "HOURLY"
     DAILY = "DAILY"
     MONTHLY = "MONTHLY"
@@ -75,12 +81,14 @@ class SmartHubLocation():
         self,
         id: str,
         service: str,
-        description: str
+        description: str,
+        provider: str,
     )  -> None:
         """Initialize the SmartHubLocation."""
         self.id = id
         self.service = service
         self.description = description
+        self.provider = provider
 
     def __str__(self):
         return f"[SmartHubLocation: '{self.id}' '{self.service}' '{self.description}']"
@@ -111,6 +119,62 @@ class SmartHubAPI:
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_created_at: Optional[datetime] = None
 
+    def parse_usage_series(self, usage_data: List[Dict], parseType: ParseType = ParseType.FORWARD) -> List[Dict]:
+        parsed_data = []
+        _LOGGER.debug(f"First 10 entries of usage data: {usage_data[:10]}")
+        for usage in usage_data:
+            # convert microseconds to timestmap -> read data as if it was in provider TZ
+            event_time = parse_epoch_set_timezone(usage.get("x") / 1000.0, ZoneInfo(self.timezone))
+            # HA stats import wants timestamps only at standard intervals -
+            # https://github.com/home-assistant/core/blob/4fef19c7bc7c1f7be827f6c489ad1df232e44906/homeassistant/components/recorder/statistics.py#L2634
+             # If the first entry isn't aligned with the top of the hour - treat it as if it was
+            if event_time.minute != 0 and len(parsed_data) == 0:
+              _LOGGER.warning("Initial usage data is not aligned with top of the hour, inserting a 0 entry at 0 minutes: event_time:%s, %s", event_time, usage.get("x"))
+              zero_time = event_time.replace(minute=0)
+              parsed_data.append({
+                "reading_time" : zero_time,
+                "consumption" : 0,
+                "raw_timestamp": int(zero_time.replace(tzinfo=timezone.utc).timestamp()*1000), # convert zero_time to UTC, and multiply by 1000
+              })
+
+            # If the previous parsed time is in a different hour, and we still don't have a 00 minute - insert a 0 entry
+            if len(parsed_data) > 0 and parsed_data[-1]["reading_time"].hour != event_time.hour and event_time.minute != 0:
+              _LOGGER.warning("Usage data is not aligned with top of the hour, inserting a 0 entry at 0 minutes: event_time:%s, %s", event_time, usage.get("x"))
+              zero_time = event_time.replace(minute=0)
+              parsed_data.append({
+                "reading_time" : zero_time,
+                "consumption" : 0,
+                "raw_timestamp": int(zero_time.replace(tzinfo=timezone.utc).timestamp()*1000), # convert zero_time to UTC, and multiply by 1000
+              })
+
+            # When doing a normal energy monitoring - never report negative numbers
+            # When doing a NET usage, only report negative numbers, but invert them to be positive
+            usage_energy = usage.get("y")
+            if parseType == ParseType.NET:
+              if usage_energy > 0:
+                usage_energy = 0
+              else:
+                usage_energy = abs(usage_energy)
+            else: # both FORWARD and RETURN use postive values
+              usage_energy = max(0,usage_energy)
+
+
+            if event_time.minute != 0:
+              _LOGGER.debug("consolidating sub hour data: %s, %s + %s", event_time, parsed_data[-1]['consumption'], usage.get("y"))
+              parsed_data[-1]['consumption'] += usage_energy
+              continue
+
+            # Ignore events with no energy recording
+            if usage_energy == 0:
+              continue
+
+            parsed_data.append({
+              "reading_time" : event_time,
+              "consumption" : usage_energy,
+              "raw_timestamp": usage.get("x"),
+            })
+
+        return parsed_data
 
     def parse_usage(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -135,56 +199,54 @@ class SmartHubAPI:
             electric_data = data.get("data", {}).get("ELECTRIC", [])
             if len(electric_data) == 0:
               _LOGGER.warning("No ELECTRIC data found in response")
+              _LOGGER.debug(data)
 
             for entry in electric_data:
                 # Find the entry with type "USAGE"
                 if entry.get("type","") == "USAGE":
-                    parsed_data = []
+                    _LOGGER.debug("Usage: %s", entry)
+
+                    meters = entry.get("meters", [])
+                    forward_series = ""
+                    net_series = ""
+                    return_series = ""
+                    if len(meters) > 2:
+                      _LOGGER.warning("More then 2 meters in usage data: %s", meters)
+                    for meter in meters:
+                      # assume forward is default if not present
+                      flow_direction = meter.get("flowDirection", ParseType.FORWARD)
+                      match flow_direction:
+                        case ParseType.FORWARD:
+                          forward_series = meter["seriesId"]
+                        case ParseType.NET:
+                          net_series = meter["seriesId"]
+                        case ParseType.RETURN:
+                          return_series = meter["seriesId"]
+                        case _:
+                          _LOGGER.warning("Unknown flow direction in meter: %s", meter)
+
                     series = entry.get("series", [])
                     for serie in series:
-                        # Extract the last data point in the "data" array
-                        usage_data = serie.get("data", [])
+                        if serie.get("name", "") == return_series:
+                            usage_data = serie.get("data", [])
+                            parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.RETURN)
+                            _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
 
-                        for usage in usage_data:
-                            event_time = datetime.fromtimestamp(usage.get("x") / 1000.0, tz=timezone.utc).replace(tzinfo=ZoneInfo(self.timezone)) # convert microseconds to timestmap -> read data as if it was in provider TZ, then conver to UTC for statistics
-                            # HA stats import wants timestamps only at standard intervals -
-                            # https://github.com/home-assistant/core/blob/4fef19c7bc7c1f7be827f6c489ad1df232e44906/homeassistant/components/recorder/statistics.py#L2634
-                             # If the first entry isn't aligned with the top of the hour - treat it as if it was
-                            if event_time.minute != 0 and len(parsed_data) == 0:
-                              _LOGGER.warning("Initial usage data is not aligned with top of the hour, inserting a 0 entry at 0 minutes: event_time:%s, %s", event_time, usage.get("x"))
-                              zero_time = event_time.replace(minute=0)
-                              parsed_data.append({
-                                "reading_time" : zero_time,
-                                "consumption" : 0,
-                                "raw_timestamp": int(zero_time.replace(tzinfo=timezone.utc).timestamp()*1000), # convert zero_time to UTC, and multiply by 1000
-                              })
+                        # If there is a NetMeter, use that for both Return and Usage (as it combines both).
+                        # NOTE - there must always be a FORWARD or NET meter - or the "USAGE" is not being returned.
+                        if serie.get("name", "") == (net_series if net_series != "" else forward_series):
+                            parsed_response[METER_NAME] = serie.get("name")
 
-                            # If the previous parsed time is in a different hour, and we still don't have a 00 minute - insert a 0 entry
-                            if len(parsed_data) > 0 and parsed_data[-1]["reading_time"].hour != event_time.hour and event_time.minute != 0:
-                              _LOGGER.warning("Usage data is not aligned with top of the hour, inserting a 0 entry at 0 minutes: event_time:%s, %s", event_time, usage.get("x"))
-                              zero_time = event_time.replace(minute=0)
-                              parsed_data.append({
-                                "reading_time" : zero_time,
-                                "consumption" : 0,
-                                "raw_timestamp": int(zero_time.replace(tzinfo=timezone.utc).timestamp()*1000), # convert zero_time to UTC, and multiply by 1000
-                              })
+                            # Extract the last data point in the "data" array
+                            usage_data = serie.get("data", [])
+                            parsed_response["USAGE"] = self.parse_usage_series(usage_data)
+                            _LOGGER.debug("Parsed %d items for USAGE history", len(parsed_response["USAGE"]))
 
-                            if event_time.minute != 0:
-                              _LOGGER.debug("consolidating sub hour data: %s, %s + %s", event_time, parsed_data[-1]['consumption'], usage.get("y"))
-                              parsed_data[-1]['consumption'] += usage.get("y")
-                              continue
-
-                            # Ignore events with no energy recording
-                            if usage.get("y") == 0:
-                              continue
-
-                            parsed_data.append({
-                              "reading_time" : event_time,
-                              "consumption" : usage.get("y"),
-                              "raw_timestamp": usage.get("x"),
-                            })
-                    _LOGGER.debug("Parsed %d items for usage history", len(parsed_data))
-                    parsed_response["USAGE"] = parsed_data
+                            if net_series != "":
+                              parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.NET)
+                              _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
+                else:
+                    _LOGGER.debug("Unknown Usage: %s", entry)
 
             return parsed_response
 
@@ -192,6 +254,75 @@ class SmartHubAPI:
             _LOGGER.error("Error parsing usage data: %s", data)
             raise SmartHubDataError(f"Error parsing usage data: {e}") from e
 
+    def parse_locations(self, location_json) -> List[SmartHubLocation]:
+        # Response format is structured as a list of dictionaries -
+        # each dictionary has the following keys
+        #   "account",
+        #   "additionalCustomerName",
+        #   "address",
+        #   "agreementStatus",
+        #   "consumerClassCode",
+        #   "customer",
+        #   "customerName",
+        #   "disconnectNonPay",
+        #   "email",
+        #   "inactive",
+        #   "invoiceGroupNumber",
+        #   "isAutoPay",
+        #   "isDisconnected",
+        #   "isMultiService",
+        #   "isPendingDisconnect",
+        #   "isUnCollectible",
+        #   "primaryServiceLocationId",
+        #   "providerOrServiceDescription",
+        #   "providerToDescription",
+        #   "providerToProviderDescription",
+        #   "serviceLocationIdToServiceLocationSummary",
+        #   "serviceLocationToIndustries",
+        #   "serviceLocationToProviders",
+        #   "serviceLocationToUserDataServiceLocationSummaries",
+        #   "serviceToProviders",
+        #   "serviceToServiceDescription",
+        #   "services"
+        # `serviceLocationToUserDataServiceLocationSummaries` Includes human readable information about the service location.
+        # Which is a map of the location_id, to a list of
+          #  "activeRateSchedules",
+          #  "address",
+          #  "description",
+          #  "id",
+          #  "lastBillPresReadDtTm",
+          #  "lastBillPrevReadDtTm",
+          #  "location",
+          #  "serviceStatus",
+          #  "services"
+
+        locations = []
+        _LOGGER.debug(location_json)
+
+        for entry in location_json:
+          electrical_providers = entry.get("serviceToProviders", {}).get(ELECTRIC_SERVICE,["unknown"])
+          providerOrServiceDescription = entry.get("providerToDescription",{})
+          electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
+          for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
+            for service_description in service_descriptions:
+              # for now only support electric service type
+              if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
+                # Try to find a good description
+                description = service_description.get("description", "")
+
+                if entry.get("inactive", False): # assume active by default
+                  continue # Don't include inactive accounts in list
+
+                locations.append(
+                  SmartHubLocation(
+                    id=location_id,
+                    service=ELECTRIC_SERVICE,
+                    description=description,
+                    provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
+                  )
+                )
+
+        return locations
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session."""
@@ -347,71 +478,7 @@ class SmartHubAPI:
                 except Exception as e:
                     raise SmartHubDataError(f"Invalid JSON response: {e}") from e
 
-                # Response format is structured as a list of dictionaries -
-                # each dictionary has the following keys
-                #   "account",
-                #   "additionalCustomerName",
-                #   "address",
-                #   "agreementStatus",
-                #   "consumerClassCode",
-                #   "customer",
-                #   "customerName",
-                #   "disconnectNonPay",
-                #   "email",
-                #   "inactive",
-                #   "invoiceGroupNumber",
-                #   "isAutoPay",
-                #   "isDisconnected",
-                #   "isMultiService",
-                #   "isPendingDisconnect",
-                #   "isUnCollectible",
-                #   "primaryServiceLocationId",
-                #   "providerOrServiceDescription",
-                #   "providerToDescription",
-                #   "providerToProviderDescription",
-                #   "serviceLocationIdToServiceLocationSummary",
-                #   "serviceLocationToIndustries",
-                #   "serviceLocationToProviders",
-                #   "serviceLocationToUserDataServiceLocationSummaries",
-                #   "serviceToProviders",
-                #   "serviceToServiceDescription",
-                #   "services"
-                # `serviceLocationToUserDataServiceLocationSummaries` Includes human readable information about the service location.
-                # Which is a map of the location_id, to a list of
-                  #  "activeRateSchedules",
-                  #  "address",
-                  #  "description",
-                  #  "id",
-                  #  "lastBillPresReadDtTm",
-                  #  "lastBillPrevReadDtTm",
-                  #  "location",
-                  #  "serviceStatus",
-                  #  "services"
-
-                locations = []
-                _LOGGER.debug(response_json)
-
-                for entry in response_json:
-                  for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
-                    for service_description in service_descriptions:
-                      # for now only support electric service type
-                      if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
-                        # Try to find a good description
-                        description = service_description.get("description")
-                        if not description or description == "unknown":
-                            description = service_description.get("address")
-                        if not description:
-                            description = service_description.get("id", "unknown")
-
-                        locations.append(
-                          SmartHubLocation(
-                            id=location_id,
-                            service=ELECTRIC_SERVICE,
-                            description=description,
-                          )
-                        )
-
-                return locations
+                return self.parse_locations(response_json)
 
         except ClientError as e:
             raise SmartHubConnectionError(f"Connection error during User_data request: {e}") from e
@@ -494,6 +561,7 @@ class SmartHubAPI:
 
                     try:
                         response_json = await response.json()
+                        # _LOGGER.debug(response_json) # Specific parts of usage are logged separately - uncomment for full response
                     except Exception as e:
                         raise SmartHubDataError(f"Invalid JSON response: {e}") from e
 
