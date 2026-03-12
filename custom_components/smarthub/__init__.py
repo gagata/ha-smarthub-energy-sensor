@@ -62,7 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SmartHubDataUpdateCoordinator(
         hass=hass,
         api=api,
-        update_interval=timedelta(minutes=config.get("poll_interval", 720)),
+        update_interval=timedelta(minutes=config.get("poll_interval")),
         config_entry=entry,
     )
     await coordinator.async_config_entry_first_refresh()
