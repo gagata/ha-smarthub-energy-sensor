@@ -1,7 +1,20 @@
 """Simple config flow for SmartHub integration."""
 import voluptuous as vol
 from homeassistant import config_entries
-from .const import DOMAIN
+from .const import (
+  DOMAIN,
+  DEFAULT_POLL_INTERVAL,
+  CONF_EMAIL,
+  CONF_PASSWORD,
+  CONF_ACCOUNT_ID,
+  CONF_LOCATION_ID,
+  CONF_HOST,
+  CONF_POLL_INTERVAL,
+  CONF_TIMEZONE,
+  CONF_MFA_TOTP,
+  MIN_POLL_INTERVAL,
+  MAX_POLL_INTERVAL
+)
 from .api import SmartHubAPI
 from .exceptions import SmartHubAuthenticationError, SmartHubConnectionError
 
@@ -60,20 +73,21 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         schema = vol.Schema(
             {
-               vol.Required("email"): str,
-               vol.Required("password"): str,
-               vol.Required("account_id"): str,
-               vol.Required("host"): str,
-               vol.Required("timezone", default="GMT"): SelectSelector(
+               vol.Required(CONF_EMAIL): str,
+               vol.Required(CONF_PASSWORD): str,
+               vol.Required(CONF_ACCOUNT_ID): str,
+               vol.Required(CONF_HOST): str,
+               vol.Required(CONF_TIMEZONE, default="GMT"): SelectSelector(
                 SelectSelectorConfig(
                   options=list(timezones), mode=SelectSelectorMode.DROPDOWN, sort=True
                 )
                ),
-               vol.Optional("mfa_totp"): TextSelector(
+               vol.Optional(CONF_MFA_TOTP): TextSelector(
                  TextSelectorConfig(
                    type=TextSelectorType.PASSWORD
                  )
                ),
+               vol.Required(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)),
             }
         )
 

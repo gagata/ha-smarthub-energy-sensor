@@ -35,6 +35,7 @@ async def test_form(hass: HomeAssistant) -> None:
                 "account_id": "12345",
                 "host": "test.smarthub.coop",
                 "timezone": "UTC",
+                "poll_interval": 360,
             },
         )
         await hass.async_block_till_done()
@@ -47,6 +48,7 @@ async def test_form(hass: HomeAssistant) -> None:
         "account_id": "12345",
         "host": "test.smarthub.coop",
         "timezone": "UTC",
+        "poll_interval": 360,
     }
     assert len(mock_setup_entry.mock_calls) == 1
 
@@ -72,6 +74,7 @@ async def test_form_invalid_auth(hass: HomeAssistant) -> None:
                 "account_id": "12345",
                 "host": "test.smarthub.coop",
                 "timezone": "UTC",
+                "poll_interval": 360,
             },
         )
 
@@ -100,6 +103,7 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
                 "account_id": "12345",
                 "host": "test.smarthub.coop",
                 "timezone": "UTC",
+                "poll_interval": 360,
             },
         )
 
@@ -128,6 +132,7 @@ async def test_form_unknown_exception(hass: HomeAssistant) -> None:
                 "account_id": "12345",
                 "host": "test.smarthub.coop",
                 "timezone": "UTC",
+                "poll_interval": 360,
             },
         )
 
