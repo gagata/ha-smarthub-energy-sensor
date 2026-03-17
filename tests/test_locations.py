@@ -19,6 +19,30 @@ def api_instance():
 def test_parse_locations(api_instance):
     """Test parsing location description."""
     test_data = [
+      { # INACTIVE
+        'customer': 'XXXXXXXX', 'customerName': 'CUSTOMER_NAME', 'additionalCustomerName': 'ADDITIONAL_CUSTOMER_NAME', 'account': 'ACCOUNT', 'address': 'ADDRESS, CITY, STATE ZIP_CODE', 'email': 'USER_ID', 'inactive': True, 'primaryServiceLocationId': 'LOCATION_ID',
+        'serviceLocationIdToServiceLocationSummary': {
+        'LOCATION_ID': {
+           'id': {'srvLocNbr': "LOCATION_ID", 'serviceLocation': 'LOCATION_ID'},
+           'location': 'YYYYYY',
+           'address': {'addr1': 'ADDRESS', 'city': 'CITY', 'state': 'STATE', 'zip': 'ZIP_CODE'},
+           'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765774800000, 'lastBillPresReadDtTm': 1768453200000,
+           'meterNumbersToExternalMeterBaseIds': {'350017381': 'LOCATION_ID+1'},
+           'activeRateSchedules': ['1ARC:NOVEC', '1ARG:NOVEC', '1ARN:NOVEC']}
+        },
+       'serviceLocationToUserDataServiceLocationSummaries': {
+         'LOCATION_ID': [
+           {'services': ['ELEC'], 'id': {'srvLocNbr': "LOCATION_ID", 'serviceLocation': 'LOCATION_ID'},
+           'location': 'YYYYYY',
+           'address': {'addr1': 'ADDRESS', 'city': 'CITY', 'state': 'STATE', 'zip': 'ZIP_CODE'},
+           'serviceStatus': 'ACTIVE', 'lastBillPrevReadDtTm': 1765774800000, 'lastBillPresReadDtTm': 1768453200000,
+           'activeRateSchedules': ['1ARC:NOVEC', '1ARG:NOVEC', '1ARN:NOVEC']}
+        ]},
+        'serviceLocationToIndustries': {'LOCATION_ID': ['ELECTRIC']},
+        'providerToDescription': {'NOVEC': 'NOVEC Electric Service'}, 'providerToProviderDescription': {'NOVEC': 'NOVEC Electric Service'},
+        'serviceToServiceDescription': {'ELEC': 'Electric Service'},
+        'serviceToProviders': {'ELEC': ['NOVEC']}, 'serviceLocationToProviders': {"LOCATION_ID": ['NOVEC']}, 'consumerClassCode': '', 'providerOrServiceDescription': 'NOVEC Electric Service', 'services': ['ELEC']
+      },
       {
         'customer': 'XXXXXXXX', 'customerName': 'CUSTOMER_NAME', 'additionalCustomerName': 'ADDITIONAL_CUSTOMER_NAME', 'account': 'ACCOUNT', 'address': 'ADDRESS, CITY, STATE ZIP_CODE', 'email': 'USER_ID', 'inactive': False, 'primaryServiceLocationId': 'LOCATION_ID',
         'serviceLocationIdToServiceLocationSummary': {
