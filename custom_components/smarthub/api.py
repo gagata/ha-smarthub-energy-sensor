@@ -301,12 +301,17 @@ class SmartHubAPI:
 
         for entry in location_json:
 
-          electric_service_keys = []
+          electric_service_keys = set()
           # Loop through the locations looking for the service description `ELECTRIC_SERVICE` which maps the service key - usually ELEC, but sometimes 1ELEC
           serviceToServiceDescription = entry.get("serviceToServiceDescription",{'ELEC': 'Electric Service'})
           for service, serviceDescription in serviceToServiceDescription.items():
             if serviceDescription == ELECTRIC_SERVICE:
-              electric_service_keys.append(service)
+              electric_service_keys.add(service)
+
+          # Some smarthub systems don't return 'Electric Service' as a distinct entity. hsvutil.smarthub.coop returns
+          # 'serviceToServiceDescription': {'WATER|NGAS|ELEC|SEWER|TRASH': 'City Utilities'},
+          if 'ELEC' in entry.get("services",[]):
+            electric_service_keys.add('ELEC')
 
           for electric_service in electric_service_keys:
               electrical_providers = entry.get("serviceToProviders", {}).get(electric_service,["unknown"])
