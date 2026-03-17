@@ -164,10 +164,6 @@ class SmartHubAPI:
               parsed_data[-1]['consumption'] += usage_energy
               continue
 
-            # Ignore events with no energy recording
-            if usage_energy == 0:
-              continue
-
             parsed_data.append({
               "reading_time" : event_time,
               "consumption" : usage_energy,
