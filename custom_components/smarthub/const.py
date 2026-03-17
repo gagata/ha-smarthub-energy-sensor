@@ -9,9 +9,11 @@ CONF_ACCOUNT_ID = "account_id"
 CONF_LOCATION_ID = "location_id"
 CONF_HOST = "host"
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_TIMEZONE = "timezone"
+CONF_MFA_TOTP = "mfa_totp"
 
 # Default values
-DEFAULT_POLL_INTERVAL = 60  # 1 hour in minutes (more frequent for energy monitoring)
+DEFAULT_POLL_INTERVAL = 360  # 6 hour in minutes
 MIN_POLL_INTERVAL = 15  # Minimum 15 minutes
 MAX_POLL_INTERVAL = 1440  # Maximum 24 hours
 

@@ -4,13 +4,13 @@
 [![Version](https://img.shields.io/github/v/release/gagata/ha-smarthub-energy-sensor)](https://github.com/gagata/ha-smarthub-energy-sensor/releases)
 [![License](https://img.shields.io/github/license/gagata/ha-smarthub-energy-sensor)](LICENSE)
 
-A Home Assistant custom integration that connects to SmartHub Coop energy portals to provide real-time electricity usage data. This integration is fully compatible with Home Assistant's Energy Dashboard and provides reliable, stable monitoring for your energy consumption.
+A Home Assistant custom integration that connects to SmartHub Coop energy portals to download the hourly or daily usage information. The integration populates historical electricity usage data, but does not show realtime data as that information is not available in SmartHub Coop energy portals. This integration is fully compatible with Home Assistant's Energy Dashboard, Net Mettering and provides reliable, stable monitoring for your energy consumption.
 
 ## ✨ Features
 
 - 🔌 **Energy Dashboard Integration**: Seamlessly works with Home Assistant's built-in Energy Dashboard, including backfilling hourly metrics
-- 📊 **Real-time Monitoring**: Tracks your electricity usage with configurable polling intervals
-- 🔒 **Secure Authentication**: Robust credential handling with proper error management
+- 📊 **Periodic Monitoring**: Tracks your electricity usage with configurable polling intervals
+- 🔒 **Secure Authentication**: Robust credential handling with proper error management including Multi Factor Auth support
 - 🔄 **Automatic Retry**: Built-in retry logic for reliable data collection
 - 🎛️ **Easy Configuration**: User-friendly configuration flow with input validation
 - 🏠 **Device Integration**: Creates proper device entities for better organization
@@ -59,6 +59,8 @@ config/
 
 ### Requirements
 
+Version 2.1 and higher requires Home Assistant version 2025.11 and greater.
+
 Before setting up the integration, you'll need to gather the following information from your SmartHub portal:
 
 1. **Email Address**: Your login email for the SmartHub portal
@@ -76,6 +78,8 @@ Before setting up the integration, you'll need to gather the following informati
    - Enter your password
    - Enter your account ID
    - Enter your SmartHub host
+   - Set the TimeZone for your meter
+   - Adjust the polling interval for how often it should query for new usage information
 
 The integration will validate your credentials and create the energy sensor automatically.
 
@@ -88,8 +92,15 @@ Once configured, your SmartHub energy sensor will automatically appear in Home A
 1. Go to **Settings** → **Dashboards** → **Energy**
 2. Click **"Add Consumption"** in the Electricity grid section
 3. Select your SmartHub energy sensor from the dropdown
-   Note: there will be multiple entries - select the one that says "Hourly usage"
+   Note: there will be multiple entries, 1 entity (monthly), and 2 Statistics (daily, hourly)- select one of the statistics which provide historical usage aligned with the your actual energy usage.
 4. The sensor will now provide data to your Energy Dashboard
+
+#### Solar or Net Metering
+Different energy providers have different solar / net metering configurations. Your energy provider might provide data on how much energy you return to the grid, how much energy you consume, or a combination of both.
+
+The integration should automatically determine the appropriate option, and provide an additional "return" hourly and daily statistic.
+
+In the Energy dashboard set the Grid Consumption entry to the "usage" statistic, and the Return to Grid to the "return" statistic.
 
 ### Sensor Details
 
@@ -100,15 +111,16 @@ Once configured, your SmartHub energy sensor will automatically appear in Home A
 
 ## 🔧 Configuration Options
 
-| Option | Default | Range | Description |
-|--------|---------|-------|-------------|
-| Poll Interval | 60 minutes | 15-1440 minutes | How often to check for new energy data |
+By default, the integration will poll the SmartHub API every 6 hours. You can adjust this when re-configuring the integration to between 15-1440 minutes.
 
 **Note**: SmartHub data typically updates every 15-60 minutes, so setting a very low poll interval may not provide more frequent updates but will increase API calls.
 
 ## 🛠️ Troubleshooting
 
 ### Common Issues
+
+**Entity Not showing historical information**
+- This is expected - the entity only stores the monthly value at the time it was polled. The integration also populates a historical `statistic` which aligns the time of use with the time the energy usage actually happened.
 
 **"Cannot Connect" Error**
 - Verify your SmartHub host is correct (without http:// or https://)
@@ -141,28 +153,6 @@ logger:
     custom_components.smarthub: debug
 ```
 
-### Manual Services
-
-The integration provides two services for manual troubleshooting:
-
-**Refresh Data Service**
-```yaml
-# Example service call to manually refresh data
-service: smarthub.refresh_data
-data:
-  entity_id: sensor.smarthub_energy_123456
-```
-
-**Refresh Authentication Service**
-```yaml
-# Example service call to force authentication refresh
-service: smarthub.refresh_authentication
-data:
-  entity_id: sensor.smarthub_energy_123456
-```
-
-These services can be called from Developer Tools → Services or used in automations.
-
 ### Support
 
 If you encounter issues:
@@ -170,7 +160,8 @@ If you encounter issues:
 1. Check the Home Assistant logs for error messages
 2. Verify all configuration parameters are correct
 3. Test access to your SmartHub portal manually
-4. [Open an issue](https://github.com/gagata/ha-smarthub-energy-sensor/issues) with logs and details
+4. Turn on the debug logs
+5. [Open an issue](https://github.com/gagata/ha-smarthub-energy-sensor/issues) with logs and details
 
 ## 🔒 Security & Privacy
 
