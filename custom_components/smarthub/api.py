@@ -164,10 +164,6 @@ class SmartHubAPI:
               parsed_data[-1]['consumption'] += usage_energy
               continue
 
-            # Ignore events with no energy recording
-            if usage_energy == 0:
-              continue
-
             parsed_data.append({
               "reading_time" : event_time,
               "consumption" : usage_energy,
@@ -300,27 +296,44 @@ class SmartHubAPI:
         _LOGGER.debug(location_json)
 
         for entry in location_json:
-          electrical_providers = entry.get("serviceToProviders", {}).get(ELECTRIC_SERVICE,["unknown"])
+          if entry.get("inactive", False): # assume active by default
+            continue # Don't include inactive accounts in list
+
+          services = entry.get("services",[])
+          serviceToProviders = entry.get("serviceToProviders", {})
+          serviceToServiceDescription = entry.get("serviceToServiceDescription",{'ELEC': 'Electric Service'})
+          serviceLocationToUserDataServiceLocationSummaries = entry.get("serviceLocationToUserDataServiceLocationSummaries", {})
           providerOrServiceDescription = entry.get("providerToDescription",{})
-          electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
-          for location_id, service_descriptions in entry.get("serviceLocationToUserDataServiceLocationSummaries", {}).items():
-            for service_description in service_descriptions:
-              # for now only support electric service type
-              if any(service in SUPPORTED_SERVICES for service in service_description.get("services",[])):
-                # Try to find a good description
-                description = service_description.get("description", "")
 
-                if entry.get("inactive", False): # assume active by default
-                  continue # Don't include inactive accounts in list
+          # Loop through the locations looking for the service description `ELECTRIC_SERVICE` which maps the service key - usually ELEC, but sometimes 1ELEC
+          electric_service_keys = {
+                service for service, desc in serviceToServiceDescription.items()
+                if desc == ELECTRIC_SERVICE
+          }
 
-                locations.append(
-                  SmartHubLocation(
-                    id=location_id,
-                    service=ELECTRIC_SERVICE,
-                    description=description,
-                    provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
-                  )
-                )
+          # Some smarthub systems don't return 'Electric Service' as a distinct entity. hsvutil.smarthub.coop returns
+          # 'serviceToServiceDescription': {'WATER|NGAS|ELEC|SEWER|TRASH': 'City Utilities'},
+          if 'ELEC' in services:
+            electric_service_keys.add('ELEC')
+
+          for electric_service in electric_service_keys:
+              electrical_providers = serviceToProviders.get(electric_service,["unknown"])
+              electrical_provider = electrical_providers[0] if electrical_providers else "unknown"
+              for locationID, serviceDescriptions in serviceLocationToUserDataServiceLocationSummaries.items():
+                for serviceDescription in serviceDescriptions:
+                  # for now only support electric service type
+                  if any(service in [electric_service] for service in serviceDescription.get("services",[])):
+                    # Try to find a good description
+                    description = serviceDescription.get("description", "")
+
+                    locations.append(
+                      SmartHubLocation(
+                        id=locationID,
+                        service=ELECTRIC_SERVICE,
+                        description=description,
+                        provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
+                      )
+                    )
 
         return locations
 
