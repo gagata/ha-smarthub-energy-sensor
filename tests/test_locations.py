@@ -181,6 +181,47 @@ def test_parse_locations(api_instance):
       compare_SmartHubLocation(a,b)
 
 
+def test_parse_locations_cvea(api_instance):
+    """Test parsing CVEA location with custom service codes and descriptions."""
+    test_data = [
+      {
+        'customer': 'XXXXXX', 'customerName': 'CVEA_USER', 'account': '12345', 'inactive': False,
+        'serviceLocationToUserDataServiceLocationSummaries': {
+          'LOC_VALDEZ': [
+            {'services': ['VELEC'], 'id': {'srvLocNbr': 'LOC_VALDEZ'}, 'description': 'Valdez Home'}
+          ],
+          'LOC_GLENNALLEN': [
+            {'services': ['GELEC'], 'id': {'srvLocNbr': 'LOC_GLENNALLEN'}, 'description': 'Glennallen Shop'}
+          ]
+        },
+        'serviceToServiceDescription': {
+            'VELEC': 'Valdez Electric',
+            'GELEC': 'Glennallen Electric'
+        },
+        'serviceToProviders': {'VELEC': ['VE'], 'GELEC': ['GE']},
+        'providerToDescription': {'VE': 'CVEA Valdez', 'GE': 'CVEA Glennallen'},
+        'services': ['VELEC', 'GELEC']
+      }
+    ]
+
+    result = api_instance.parse_locations(test_data)
+    
+    # We expect two locations to be found
+    assert len(result) == 2
+    
+    # Check Valdez location
+    valdez = next(l for l in result if l.id == 'LOC_VALDEZ')
+    assert valdez.service == ELECTRIC_SERVICE
+    assert valdez.description == 'Valdez Home'
+    assert valdez.provider == 'CVEA Valdez'
+
+    # Check Glennallen location
+    glenn = next(l for l in result if l.id == 'LOC_GLENNALLEN')
+    assert glenn.service == ELECTRIC_SERVICE
+    assert glenn.description == 'Glennallen Shop'
+    assert glenn.provider == 'CVEA Glennallen'
+
+
 def compare_SmartHubLocation(a: SmartHubLocation, b: SmartHubLocation):
     """comprae two SmartHubLocation objects."""
     # Test that API object is created correctly
