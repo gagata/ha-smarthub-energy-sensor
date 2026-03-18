@@ -309,7 +309,7 @@ class SmartHubAPI:
           # Loop through the locations looking for the service description `ELECTRIC_SERVICE` which maps the service key - usually ELEC, but sometimes 1ELEC
           electric_service_keys = {
                 service for service, desc in serviceToServiceDescription.items()
-                if ELECTRIC_SERVICE.lower() in desc.lower()
+                if isinstance(desc, str) and ELECTRIC_SERVICE.lower() in desc.lower()
           }
 
           # Some smarthub systems don't return 'Electric Service' as a distinct entity. hsvutil.smarthub.coop returns
