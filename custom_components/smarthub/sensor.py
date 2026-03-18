@@ -91,7 +91,7 @@ async def async_setup_entry(
           )
       )
 
-    async_add_entities(entities, update_before_add=True)
+    async_add_entities(entities)
     _LOGGER.debug(f"{len(entities)} SmartHub sensor entities added successfully")
 
 
