@@ -19,6 +19,7 @@ from .const import (
     SESSION_TIMEOUT,
     ELECTRIC_SERVICE,
     SUPPORTED_SERVICES,
+    FALLBACK_SERVICES,
     METER_NAME,
 )
 from .exceptions import (
@@ -308,13 +309,14 @@ class SmartHubAPI:
           # Loop through the locations looking for the service description `ELECTRIC_SERVICE` which maps the service key - usually ELEC, but sometimes 1ELEC
           electric_service_keys = {
                 service for service, desc in serviceToServiceDescription.items()
-                if desc == ELECTRIC_SERVICE
+                if isinstance(desc, str) and ELECTRIC_SERVICE.lower() in desc.lower()
           }
 
           # Some smarthub systems don't return 'Electric Service' as a distinct entity. hsvutil.smarthub.coop returns
           # 'serviceToServiceDescription': {'WATER|NGAS|ELEC|SEWER|TRASH': 'City Utilities'},
-          if 'ELEC' in services:
-            electric_service_keys.add('ELEC')
+          for fallback in FALLBACK_SERVICES:
+            if fallback in services:
+              electric_service_keys.add(fallback)
 
           for electric_service in electric_service_keys:
               electrical_providers = serviceToProviders.get(electric_service,["unknown"])
