@@ -36,6 +36,7 @@ class ParseType(StrEnum):
     FORWARD = "FORWARD"
     NET = "NET"
     RETURN = "RETURN"
+    TOTAL = "TOTAL"
 
 class Aggregation(StrEnum):
     HOURLY = "HOURLY"
@@ -213,7 +214,7 @@ class SmartHubAPI:
                       # assume forward is default if not present
                       flow_direction = meter.get("flowDirection", ParseType.FORWARD)
                       match flow_direction:
-                        case ParseType.FORWARD:
+                        case ParseType.FORWARD | ParseType.TOTAL:
                           forward_series = meter["seriesId"]
                         case ParseType.NET:
                           net_series = meter["seriesId"]
