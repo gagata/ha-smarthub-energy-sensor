@@ -36,6 +36,7 @@ class ParseType(StrEnum):
     FORWARD = "FORWARD"
     NET = "NET"
     RETURN = "RETURN"
+    REVERSE = "REVERSE"
 
 class Aggregation(StrEnum):
     HOURLY = "HOURLY"
@@ -217,7 +218,7 @@ class SmartHubAPI:
                           forward_series = meter["seriesId"]
                         case ParseType.NET:
                           net_series = meter["seriesId"]
-                        case ParseType.RETURN:
+                        case ParseType.RETURN | ParseType.REVERSE:
                           return_series = meter["seriesId"]
                         case _:
                           _LOGGER.warning("Unknown flow direction in meter: %s", meter)
