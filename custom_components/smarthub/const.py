@@ -31,6 +31,8 @@ ATTR_ACCOUNT_ID = "account_id"
 ATTR_LOCATION_ID = "location_id"
 LOCATION_KEY = "location"
 METER_NAME   = "meter_name"
+METER_ID     = "meter_id"
+METERS_KEY   = "meters"
 
 # List of supported services provided by the smarthub endpoint
 ELECTRIC_SERVICE = "electric"
