@@ -85,15 +85,20 @@ class SmartHubLocation():
         service: str,
         description: str,
         provider: str,
+        account: str | None = None,
     )  -> None:
         """Initialize the SmartHubLocation."""
         self.id = id
         self.service = service
         self.description = description
         self.provider = provider
+        # The account number this service location is billed under. One SmartHub login can hold
+        # several accounts (one per meter); a usage poll must carry the location's own account
+        # number or the utility answers COMPLETE with no data for it.
+        self.account = account
 
     def __str__(self):
-        return f"[SmartHubLocation: '{self.id}' '{self.service}' '{self.description}']"
+        return f"[SmartHubLocation: '{self.id}' '{self.service}' '{self.description}' account={self.account}]"
 
 class SmartHubAPI:
     """Class to interact with the SmartHub API."""
@@ -335,6 +340,7 @@ class SmartHubAPI:
                         service=ELECTRIC_SERVICE,
                         description=description,
                         provider=providerOrServiceDescription.get(electrical_provider,electrical_provider),
+                        account=str(entry.get("account")) if entry.get("account") is not None else None,
                       )
                     )
 
@@ -528,7 +534,8 @@ class SmartHubAPI:
             "screen": "USAGE_EXPLORER",
             "includeDemand": False,
             "serviceLocationNumber": location.id,
-            "accountNumber": self.account_id,
+            # Poll with the account the location is billed under; fall back to the configured one.
+            "accountNumber": getattr(location, "account", None) or self.account_id,
             "industries": ["ELECTRIC"],
             "startDateTime": str(start_timestamp),
             "endDateTime": str(end_timestamp),
