@@ -1,6 +1,16 @@
 """Tests for utility functions."""
 from zoneinfo import ZoneInfo
-from custom_components.smarthub.utils import sanitize_host, parse_epoch_set_timezone
+from custom_components.smarthub.utils import sanitize_host, parse_epoch_set_timezone, normalize_meter_id
+
+def test_normalize_meter_id():
+    """Meter ids must become valid lowercase statistic-id fragments."""
+    assert normalize_meter_id("1ND91111111") == "1nd91111111"
+    assert normalize_meter_id("Main Meter") == "main_meter"
+    assert normalize_meter_id("abc-123") == "abc_123"
+    assert normalize_meter_id("A__B") == "a_b"
+    assert normalize_meter_id("ok_id") == "ok_id"
+    assert normalize_meter_id("---") == "meter"
+    assert normalize_meter_id("") == "meter"
 
 def test_sanitize_host():
     """Test that the host is correctly sanitized."""

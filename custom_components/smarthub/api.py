@@ -21,6 +21,8 @@ from .const import (
     SUPPORTED_SERVICES,
     FALLBACK_SERVICES,
     METER_NAME,
+    LEGACY_METER,
+    LEGACY_USAGE_RETURN,
 )
 from .exceptions import (
     SmartHubAuthenticationError,
@@ -31,6 +33,16 @@ from .exceptions import (
 from .utils import sanitize_host, parse_epoch_set_timezone
 
 _LOGGER = logging.getLogger(__name__)
+
+def _meter_identifier(meter: Dict[str, Any]) -> str:
+    """Prefer the physical meter number over the series id."""
+    return str(
+        meter.get("meterNumber")
+        or meter.get("meter")
+        or meter.get("id")
+        or meter.get("seriesId")
+        or ""
+    )
 
 class ParseType(StrEnum):
     FORWARD = "FORWARD"
@@ -205,9 +217,10 @@ class SmartHubAPI:
                     _LOGGER.debug("Usage: %s", entry)
 
                     meters = entry.get("meters", [])
-                    forward_meters = []  # list of (series_id, meter_meta)
+                    forward_meters = []  # every FORWARD/TOTAL meter, in response order
+                    net_meter = None
                     net_series = ""
-                    return_series = ""
+                    return_meters = []
                     if len(meters) > 2:
                       _LOGGER.warning("More then 2 meters in usage data: %s", meters)
                     for meter in meters:
@@ -218,29 +231,44 @@ class SmartHubAPI:
                           # Keep ALL forward/total meters (e.g. Main + off-peak), not just the last one
                           forward_meters.append(meter)
                         case ParseType.NET:
+                          net_meter = meter
                           net_series = meter["seriesId"]
                         case ParseType.RETURN:
-                          return_series = meter["seriesId"]
+                          return_meters.append(meter)
                         case _:
                           _LOGGER.warning("Unknown flow direction in meter: %s", meter)
 
                     series_by_name = {serie.get("name", ""): serie for serie in entry.get("series", [])}
 
-                    if return_series and return_series in series_by_name:
-                        usage_data = series_by_name[return_series].get("data", [])
-                        parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.RETURN)
-                        _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
+                    return_by_identity = {}
+                    last_return_points = None
+                    for meter in return_meters:
+                        series_id = meter.get("seriesId")
+                        if not series_id or series_id not in series_by_name:
+                            _LOGGER.warning("Return meter series not found: %s", meter)
+                            continue
+                        parsed_return = self.parse_usage_series(
+                            series_by_name[series_id].get("data", []), ParseType.RETURN
+                        )
+                        identity = _meter_identifier(meter)
+                        if identity:
+                            return_by_identity[identity] = parsed_return
+                        last_return_points = parsed_return
+                        _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_return))
 
                     meter_results = []
-                    # Prefer NET for consumption when present (solar net metering); else each FORWARD meter
-                    if net_series and net_series in series_by_name:
+                    # Prefer NET for consumption when present (solar net metering); else each FORWARD meter.
+                    # The legacy (pre-per-meter) stream stays on NET, or on the last FORWARD meter.
+                    if net_meter and net_series in series_by_name:
                         serie = series_by_name[net_series]
                         usage_data = serie.get("data", [])
+                        usage_return = self.parse_usage_series(usage_data, ParseType.NET)
                         meter_results.append({
-                            "meter_id": str(net_series),
+                            "meter_id": _meter_identifier(net_meter) or str(net_series),
                             METER_NAME: serie.get("name") or str(net_series),
                             "USAGE": self.parse_usage_series(usage_data),
-                            "USAGE_RETURN": self.parse_usage_series(usage_data, ParseType.NET),
+                            "USAGE_RETURN": usage_return,
+                            LEGACY_USAGE_RETURN: usage_return,
                         })
                     else:
                         for meter in forward_meters:
@@ -250,30 +278,58 @@ class SmartHubAPI:
                                 continue
                             serie = series_by_name[series_id]
                             usage_data = serie.get("data", [])
-                            # Prefer explicit meter number fields when SmartHub provides them
-                            meter_id = (
-                                meter.get("meterNumber")
-                                or meter.get("meter")
-                                or meter.get("id")
-                                or series_id
-                            )
+                            meter_id = _meter_identifier(meter) or str(series_id)
                             meter_label = serie.get("name") or meter.get("description") or str(meter_id)
-                            meter_results.append({
+                            meter_entry = {
                                 "meter_id": str(meter_id),
                                 METER_NAME: meter_label,
                                 "USAGE": self.parse_usage_series(usage_data),
-                            })
-                            _LOGGER.debug("Parsed %d items for meter %s", len(meter_results[-1]["USAGE"]), meter_label)
+                            }
+                            matched_return = return_by_identity.get(str(meter_id))
+                            if matched_return is not None:
+                                meter_entry["USAGE_RETURN"] = matched_return
+                            meter_results.append(meter_entry)
+                            _LOGGER.debug("Parsed %d items for meter %s", len(meter_entry["USAGE"]), meter_label)
+                        # Old code kept a single RETURN series on the location statistic.
+                        if meter_results and last_return_points is not None:
+                            meter_results[-1][LEGACY_USAGE_RETURN] = last_return_points
 
-                    parsed_response["meters"] = meter_results
-                    # Backward compatible single-meter fields (first meter)
+                    if not meter_results:
+                        # Series-only payloads (and older fixtures) have no top-level meters list.
+                        # Match the previous parser: an empty series name selects that series.
+                        selected_name = net_series or (forward_meters[-1].get("seriesId") if forward_meters else "") or ""
+                        matched = None
+                        for serie in entry.get("series", []):
+                            if serie.get("name", "") == selected_name:
+                                matched = serie
+                        if matched is not None:
+                            usage = self.parse_usage_series(matched.get("data", []))
+                            meter_id = str(matched.get("meterNumber") or matched.get("name") or "meter")
+                            meter_entry = {
+                                "meter_id": meter_id,
+                                METER_NAME: matched.get("name") or meter_id,
+                                "USAGE": usage,
+                            }
+                            if net_series:
+                                usage_return = self.parse_usage_series(matched.get("data", []), ParseType.NET)
+                                meter_entry["USAGE_RETURN"] = usage_return
+                                meter_entry[LEGACY_USAGE_RETURN] = usage_return
+                            meter_results.append(meter_entry)
+
                     if meter_results:
-                        parsed_response[METER_NAME] = meter_results[0][METER_NAME]
-                        parsed_response["USAGE"] = meter_results[0]["USAGE"]
-                        if "USAGE_RETURN" in meter_results[0]:
-                            parsed_response["USAGE_RETURN"] = meter_results[0]["USAGE_RETURN"]
-                        elif "USAGE_RETURN" not in parsed_response and return_series:
-                            pass  # already set above from return_series
+                        for item in meter_results:
+                            item[LEGACY_METER] = False
+                        # Last FORWARD (or the NET meter) is what the integration used to keep.
+                        meter_results[-1][LEGACY_METER] = True
+                        legacy = meter_results[-1]
+                        parsed_response[METER_NAME] = legacy.get(METER_NAME)
+                        parsed_response["USAGE"] = legacy.get("USAGE", [])
+                        legacy_return = legacy.get(LEGACY_USAGE_RETURN)
+                        if legacy_return is None:
+                            legacy_return = legacy.get("USAGE_RETURN")
+                        if legacy_return is not None:
+                            parsed_response["USAGE_RETURN"] = legacy_return
+                    parsed_response["meters"] = meter_results
                 else:
                     _LOGGER.debug("Unknown Usage: %s", entry)
 

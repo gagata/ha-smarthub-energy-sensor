@@ -33,6 +33,10 @@ LOCATION_KEY = "location"
 METER_NAME   = "meter_name"
 METER_ID     = "meter_id"
 METERS_KEY   = "meters"
+# Coordinator/parser flag: this meter is the one the pre-per-meter integration stored.
+LEGACY_METER = "legacy_meter"
+# Return series previously written to the location-level statistic (last RETURN, or NET).
+LEGACY_USAGE_RETURN = "legacy_usage_return"
 
 # List of supported services provided by the smarthub endpoint
 ELECTRIC_SERVICE = "electric"

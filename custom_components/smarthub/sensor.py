@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -36,6 +36,67 @@ def _as_utc_datetime(value):
             ts /= 1000.0
         return datetime.fromtimestamp(ts, tz=timezone.utc)
     return value
+
+
+def _meters_from_energy_data(data: Dict[str, Any] | None, location) -> list:
+    """Return per-meter rows, synthesizing one legacy row from top-level USAGE."""
+    meter_list = list((data or {}).get("meters") or [])
+    if not meter_list and data and data.get("USAGE"):
+        usage_return = data.get("USAGE_RETURN")
+        meter_list = [{
+            "meter_id": str(location.id),
+            METER_NAME: data.get(METER_NAME) or location.description or str(location.id),
+            "USAGE": data.get("USAGE"),
+            "USAGE_RETURN": usage_return,
+            LEGACY_USAGE_RETURN: usage_return,
+            LEGACY_METER: True,
+        }]
+    if meter_list and not any(meter.get(LEGACY_METER) for meter in meter_list):
+        meter_list[-1][LEGACY_METER] = True
+    return meter_list
+
+
+def _usages_empty(meter_list: list) -> bool:
+    """True when every meter is missing consumption points (or there are no meters)."""
+    if not meter_list:
+        return True
+    return all(not (meter.get("USAGE") or []) for meter in meter_list)
+
+
+def _has_return_points(meter_list: list) -> bool:
+    return any(
+        (meter.get("USAGE_RETURN") or meter.get(LEGACY_USAGE_RETURN) or [])
+        for meter in meter_list
+    )
+
+
+def entity_key_for_meter(location_id: str, meter: Dict[str, Any]) -> str:
+    """Stable coordinator key.
+
+    The legacy meter keeps the pre-per-meter location id so an entity created
+    before meter ids were known keeps finding its data. Other meters use a
+    normalized id that does not change between updates.
+    """
+    if meter.get(LEGACY_METER):
+        return str(location_id)
+    safe = normalize_meter_id(str(meter.get("meter_id") or location_id))
+    return f"{location_id}_{safe}"
+
+
+def _accumulate_statistics(readings, running_sum: float, last_time):
+    """Build external statistic points strictly after ``last_time``."""
+    total = running_sum
+    statistics = []
+    for reading in readings or []:
+        start = _as_utc_datetime(reading["reading_time"])
+        if last_time is not None and start <= last_time:
+            continue
+        value = float(reading.get("consumption") or 0)
+        if value < 0:
+            value = 0.0
+        total += value
+        statistics.append(StatisticData(start=start, state=value, sum=total))
+    return statistics
 
 from homeassistant.util.unit_conversion import EnergyConverter
 from homeassistant.components.recorder.statistics import (
@@ -75,7 +136,10 @@ from .const import (
     HISTORICAL_IMPORT_DAYS,
     METER_NAME,
     METER_ID,
+    LEGACY_METER,
+    LEGACY_USAGE_RETURN,
 )
+from .utils import normalize_meter_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,25 +159,42 @@ async def async_setup_entry(
     # Ensure that it is the smartHub coordinator
     assert type(coordinator) is SmartHubDataUpdateCoordinator
 
-    last_locations_consumption = coordinator.data.items()
+    known_keys: set[str] = set()
 
-    # Create sensor entities for each location+meter
-    entities = []
-    for entity_key, last_consumption in last_locations_consumption:
-      entities.append(
-          SmartHubEnergySensor(
-              coordinator=coordinator,
-              config_entry=config_entry,
-              config=config,
-              location=last_consumption.get(LOCATION_KEY),
-              entity_key=entity_key,
-              meter_id=last_consumption.get(METER_ID),
-              meter_name=last_consumption.get(METER_NAME),
-          )
-      )
+    def _new_entities() -> list[SmartHubEnergySensor]:
+        """Create sensors for coordinator keys that do not have an entity yet."""
+        entities: list[SmartHubEnergySensor] = []
+        for entity_key, last_consumption in (coordinator.data or {}).items():
+            if entity_key in known_keys or not isinstance(last_consumption, dict):
+                continue
+            location = last_consumption.get(LOCATION_KEY)
+            if location is None:
+                continue
+            known_keys.add(entity_key)
+            entities.append(
+                SmartHubEnergySensor(
+                    coordinator=coordinator,
+                    config_entry=config_entry,
+                    config=config,
+                    location=location,
+                    entity_key=str(entity_key),
+                    meter_id=last_consumption.get(METER_ID),
+                    meter_name=last_consumption.get(METER_NAME),
+                    legacy=bool(last_consumption.get(LEGACY_METER)),
+                )
+            )
+        return entities
 
-    async_add_entities(entities)
-    _LOGGER.debug(f"{len(entities)} SmartHub sensor entities added successfully")
+    @callback
+    def _async_add_new_meters() -> None:
+        """Add meters that showed up after the platform was set up."""
+        new_entities = _new_entities()
+        if new_entities:
+            async_add_entities(new_entities)
+
+    config_entry.async_on_unload(coordinator.async_add_listener(_async_add_new_meters))
+    _async_add_new_meters()
+    _LOGGER.debug("SmartHub sensor platform ready (%s entities)", len(known_keys))
 
 
 class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
@@ -155,8 +236,9 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
               await self._insert_statistics(location, Aggregation.DAILY)
 
               # Entity value = month-to-date kWh per meter.
-              # Some coops (incl. SWCE) return empty MONTHLY series mid-cycle;
-              # fall back to summing DAILY points for the current month.
+              # Some coops (incl. SWCE) return empty MONTHLY series mid-cycle,
+              # including meters whose USAGE lists are empty. Fall back to
+              # summing DAILY points for the current month.
               first_day_of_current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
               data = await self.api.get_energy_data(
@@ -164,17 +246,10 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                   start_datetime=first_day_of_current_month,
                   aggregation=Aggregation.MONTHLY,
               ) or {}
-              meter_list = data.get("meters") or []
-              if not meter_list and data.get("USAGE"):
-                  meter_list = [{
-                      "meter_id": str(location.id),
-                      METER_NAME: data.get(METER_NAME) or location.description or str(location.id),
-                      "USAGE": data.get("USAGE"),
-                      "USAGE_RETURN": data.get("USAGE_RETURN"),
-                  }]
+              meter_list = _meters_from_energy_data(data, location)
 
               use_daily_sum = False
-              if not meter_list:
+              if _usages_empty(meter_list):
                   _LOGGER.info(
                       "Monthly usage empty for %s; falling back to daily month-to-date totals",
                       location,
@@ -184,25 +259,19 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                       start_datetime=first_day_of_current_month,
                       aggregation=Aggregation.DAILY,
                   ) or {}
-                  meter_list = data.get("meters") or []
-                  if not meter_list and data.get("USAGE"):
-                      meter_list = [{
-                          "meter_id": str(location.id),
-                          METER_NAME: data.get(METER_NAME) or location.description or str(location.id),
-                          "USAGE": data.get("USAGE"),
-                          "USAGE_RETURN": data.get("USAGE_RETURN"),
-                      }]
+                  meter_list = _meters_from_energy_data(data, location)
                   use_daily_sum = True
 
-              if not meter_list:
+              if _usages_empty(meter_list):
                   _LOGGER.warning("No data received from SmartHub API for location %s", location)
-                  entity_key = f"{location.id}"
-                  entity_response[entity_key] = {
+                  # Keep the location-id key used before per-meter sensors existed.
+                  entity_response[str(location.id)] = {
                     ENERGY_SENSOR_KEY: 0,
                     ATTR_LAST_READING_TIME: first_day_of_current_month.replace(tzinfo=ZoneInfo(self.api.timezone)),
                     LOCATION_KEY: location,
                     METER_NAME: None,
                     METER_ID: str(location.id),
+                    LEGACY_METER: True,
                   }
                   continue
 
@@ -210,7 +279,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                   usage = meter.get("USAGE") or []
                   meter_id = str(meter.get("meter_id") or location.id)
                   meter_name = meter.get(METER_NAME) or meter_id
-                  entity_key = f"{location.id}_{meter_id}"
+                  entity_key = entity_key_for_meter(location.id, meter)
                   if not usage:
                       _LOGGER.warning("No USAGE points for location %s meter %s", location, meter_id)
                       entity_response[entity_key] = {
@@ -219,12 +288,12 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                         LOCATION_KEY: location,
                         METER_NAME: meter_name,
                         METER_ID: meter_id,
+                        LEGACY_METER: bool(meter.get(LEGACY_METER)),
                       }
                       continue
                   last_reading = usage[-1]
                   if use_daily_sum:
-                      month_total = sum(float(pt.get("consumption") or 0) for pt in usage)
-                      value = month_total
+                      value = sum(float(pt.get("consumption") or 0) for pt in usage)
                   else:
                       value = last_reading["consumption"]
                   _LOGGER.debug(
@@ -237,6 +306,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                     LOCATION_KEY: location,
                     METER_NAME: meter_name,
                     METER_ID: meter_id,
+                    LEGACY_METER: bool(meter.get(LEGACY_METER)),
                   }
 
             return entity_response
@@ -272,36 +342,78 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             start_datetime = datetime.fromtimestamp(last_stat[legacy_consumption_id][0]["start"], tz=timezone.utc) - timedelta(days=2)
 
         smarthub_data = await self.api.get_energy_data(location=location, aggregation=aggregation, start_datetime=start_datetime)
-        meter_list = (smarthub_data or {}).get("meters") or []
-        if not meter_list and smarthub_data and smarthub_data.get("USAGE"):
-            meter_list = [{
-                "meter_id": str(location.id),
-                METER_NAME: smarthub_data.get(METER_NAME) or location.description or str(location.id),
-                "USAGE": smarthub_data.get("USAGE"),
-                "USAGE_RETURN": smarthub_data.get("USAGE_RETURN"),
-            }]
-        if not meter_list:
+        meter_list = _meters_from_energy_data(smarthub_data, location)
+        if _usages_empty(meter_list) and not _has_return_points(meter_list):
             _LOGGER.warning("No data received from SmartHub API for location %s to populate historical %s stats", location, aggregation.label)
             return
 
         for meter in meter_list:
-            await self._insert_meter_statistics(location, aggregation, meter, start_datetime if last_stat else None)
+            await self._insert_meter_statistics(location, aggregation, meter)
 
-    async def _insert_meter_statistics(self, location, aggregation: Aggregation, meter: Dict[str, Any], continue_from):
+    async def _async_sum_baseline(self, consumption_id: str, return_id: str, readings: list, aggregation: Aggregation):
+        """Return ``(consumption_sum, return_sum, last_start)`` or None if the series is new."""
+        last_stat = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, consumption_id, True, set()
+        )
+        if not last_stat or consumption_id not in last_stat:
+            return None
+
+        start = readings[0].get("reading_time") if readings else None
+        if start is not None and not isinstance(start, datetime):
+            start = _as_utc_datetime(start)
+
+        stats = {}
+        if start is not None:
+            for end in (start + timedelta(seconds=1), None):
+                stats = await get_instance(self.hass).async_add_executor_job(
+                    statistics_during_period,
+                    self.hass,
+                    start,
+                    end,
+                    {consumption_id, return_id},
+                    aggregation.period,
+                    None,
+                    {"sum"},
+                )
+                if stats and stats.get(consumption_id):
+                    break
+
+        def _safe_get_sum(records: list) -> float:
+            if records and "sum" in records[0]:
+                return float(records[0]["sum"])
+            return 0.0
+
+        if stats and stats.get(consumption_id):
+            return (
+                _safe_get_sum(stats.get(consumption_id, [])),
+                _safe_get_sum(stats.get(return_id, [])),
+                _as_utc_datetime(stats[consumption_id][0]["start"]),
+            )
+
+        record = last_stat[consumption_id][0]
+        return (float(record.get("sum") or 0.0), 0.0, _as_utc_datetime(record.get("start")))
+
+    async def _insert_meter_statistics(self, location, aggregation: Aggregation, meter: Dict[str, Any]):
         """Write hourly/daily statistics for a single meter."""
         meter_id = str(meter.get("meter_id") or location.id)
         meter_name = meter.get(METER_NAME) or meter_id
         usage_points = meter.get("USAGE") or []
-        if not usage_points:
+        return_points = meter.get("USAGE_RETURN") or []
+        if LEGACY_USAGE_RETURN in meter:
+            legacy_return_points = meter.get(LEGACY_USAGE_RETURN) or []
+        else:
+            legacy_return_points = return_points
+        if not usage_points and not return_points and not legacy_return_points:
             _LOGGER.warning("No USAGE history for location %s meter %s", location, meter_id)
             return
 
-        # Sanitize meter id for statistic ids (keep digits/letters/_-)
-        safe_meter = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in meter_id)
+        # Lowercase and strip characters Home Assistant rejects in statistic ids.
+        safe_meter = normalize_meter_id(meter_id)
+        is_legacy = bool(meter.get(LEGACY_METER))
 
         consumption_statistic_id = f"{DOMAIN}:smarthub_energy_sensor{aggregation.suffix}_{self.account_id}_{location.id}_{safe_meter}"
         return_statistic_id = f"{DOMAIN}:smarthub_energy_return_sensor{aggregation.suffix}_{self.account_id}_{location.id}_{safe_meter}"
-        # Also keep writing legacy location-only id for the first meter so existing Energy dashboard entries keep working
+        # Location-only ids are what existing Energy dashboards already track.
         legacy_consumption_id = f"{DOMAIN}:smarthub_energy_sensor{aggregation.suffix}_{self.account_id}_{location.id}"
         legacy_return_id = f"{DOMAIN}:smarthub_energy_return_sensor{aggregation.suffix}_{self.account_id}_{location.id}"
 
@@ -327,82 +439,70 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             unit_of_measurement=consumption_unit,
         )
 
-        last_stat = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics, self.hass, 1, consumption_statistic_id, True, set()
+        readings_for_baseline = usage_points or return_points or legacy_return_points
+        per_meter_baseline = await self._async_sum_baseline(
+            consumption_statistic_id, return_statistic_id, readings_for_baseline, aggregation
         )
-        if not last_stat:
-            # Fall back to legacy location statistic for continuity on first meter
-            last_stat = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, legacy_consumption_id, True, set()
-            )
-            if last_stat and legacy_consumption_id in last_stat:
-                last_stat = {consumption_statistic_id: last_stat[legacy_consumption_id]}
-
-        if not last_stat:
-            consumption_sum = 0.0
-            return_sum = 0.0
-            last_stats_time = None
-        else:
-            start = usage_points[0].get("reading_time")
-            stats = {}
-            for end in (start + timedelta(seconds=1), None):
-                stats = await get_instance(self.hass).async_add_executor_job(
-                    statistics_during_period,
-                    self.hass,
-                    start,
-                    end,
-                    {consumption_statistic_id, return_statistic_id, legacy_consumption_id, legacy_return_id},
-                    aggregation.period,
-                    None,
-                    {"sum"},
-                )
-                if stats:
-                    break
-            def _safe_get_sum(records: list) -> float:
-                if records and "sum" in records[0]:
-                    return float(records[0]["sum"])
-                return 0.0
-            # Prefer per-meter stats; else legacy
-            if consumption_statistic_id in stats and stats[consumption_statistic_id]:
-                consumption_sum = _safe_get_sum(stats.get(consumption_statistic_id, []))
-                last_stats_time = _as_utc_datetime(stats[consumption_statistic_id][0]["start"])
-            elif legacy_consumption_id in stats and stats[legacy_consumption_id]:
-                consumption_sum = _safe_get_sum(stats.get(legacy_consumption_id, []))
-                last_stats_time = _as_utc_datetime(stats[legacy_consumption_id][0]["start"])
-            else:
-                consumption_sum = 0.0
-                last_stats_time = None
-            return_sum = _safe_get_sum(stats.get(return_statistic_id, []) or stats.get(legacy_return_id, []))
-
-        consumption_statistics = []
-        return_statistics = []
-        for reading in usage_points:
-            start = _as_utc_datetime(reading["reading_time"])
-            if last_stats_time is not None and start <= last_stats_time:
-                continue
-            consumption_sum += float(reading.get("consumption") or 0)
-            consumption_statistics.append(
-                StatisticData(start=start, state=float(reading.get("consumption") or 0), sum=consumption_sum)
-            )
-            if meter.get("USAGE_RETURN"):
-                # paired by index when present on same meter dict as NET
-                pass
-
-        # Handle return series if present on this meter
-        for reading in (meter.get("USAGE_RETURN") or []):
-            start = _as_utc_datetime(reading["reading_time"])
-            if last_stats_time is not None and start <= last_stats_time:
-                continue
-            return_state = float(reading.get("consumption") or 0)
-            return_sum += return_state
-            return_statistics.append(
-                StatisticData(start=start, state=return_state, sum=return_sum)
+        legacy_baseline = None
+        if is_legacy:
+            legacy_baseline = await self._async_sum_baseline(
+                legacy_consumption_id, legacy_return_id, readings_for_baseline, aggregation
             )
 
-        _LOGGER.info("Adding %s statistics for %s", len(consumption_statistics), consumption_statistic_id)
-        async_add_external_statistics(self.hass, consumption_metadata, consumption_statistics)
+        # Seed a brand-new per-meter series from the legacy sum so the first
+        # import does not restart the running total at zero.
+        used = per_meter_baseline or legacy_baseline or (0.0, 0.0, None)
+        consumption_statistics = _accumulate_statistics(usage_points, used[0], used[2])
+        return_statistics = _accumulate_statistics(return_points, used[1], used[2])
+
+        if consumption_statistics:
+            _LOGGER.info("Adding %s statistics for %s", len(consumption_statistics), consumption_statistic_id)
+            async_add_external_statistics(self.hass, consumption_metadata, consumption_statistics)
         if return_statistics:
+            _LOGGER.info("Adding %s return statistics for %s", len(return_statistics), return_statistic_id)
             async_add_external_statistics(self.hass, return_metadata, return_statistics)
+
+        if not is_legacy:
+            return
+
+        if legacy_baseline and legacy_baseline != used:
+            legacy_consumption = _accumulate_statistics(usage_points, legacy_baseline[0], legacy_baseline[2])
+            legacy_return = _accumulate_statistics(legacy_return_points, legacy_baseline[1], legacy_baseline[2])
+        else:
+            legacy_consumption = consumption_statistics
+            # Same baseline: rebuild return points when the legacy series is a
+            # different RETURN channel than this meter's own export series.
+            if legacy_return_points is return_points:
+                legacy_return = return_statistics
+            else:
+                legacy_return = _accumulate_statistics(legacy_return_points, used[1], used[2])
+
+        description = location.description if location.description != "" else meter_name
+        legacy_name = f"{self.account_id} - {description}"
+        legacy_consumption_metadata = StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=f"{location.provider} SmartHub Energy {aggregation.label} Usage - {legacy_name}",
+            source=DOMAIN,
+            statistic_id=legacy_consumption_id,
+            unit_class=consumption_unit_class,
+            unit_of_measurement=consumption_unit,
+        )
+        legacy_return_metadata = StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=f"{location.provider} SmartHub Energy {aggregation.label} Return - {legacy_name}",
+            source=DOMAIN,
+            statistic_id=legacy_return_id,
+            unit_class=consumption_unit_class,
+            unit_of_measurement=consumption_unit,
+        )
+        if legacy_consumption:
+            _LOGGER.info("Adding %s statistics for %s", len(legacy_consumption), legacy_consumption_id)
+            async_add_external_statistics(self.hass, legacy_consumption_metadata, legacy_consumption)
+        if legacy_return:
+            _LOGGER.info("Adding %s return statistics for %s", len(legacy_return), legacy_return_id)
+            async_add_external_statistics(self.hass, legacy_return_metadata, legacy_return)
 
 
 class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
@@ -422,6 +522,7 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
         entity_key: str,
         meter_id: str | None = None,
         meter_name: str | None = None,
+        legacy: bool = False,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -432,15 +533,26 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
         self._entity_key = entity_key
         self._meter_id = str(meter_id or location.id)
         self._meter_name = meter_name or self._meter_id
-        # Include meter id so Main vs off-peak are distinct entities
-        self._attr_unique_id = f"{config_entry.unique_id}_{location.id}_{self._meter_id}_energy"
-
+        # The pre-per-meter entity is keyed only by location. Keep that unique
+        # id so existing registry entries, dashboards, and automations stay put.
+        # A key equal to the location id is that same entity even if it was
+        # created while the first update had no meter list yet.
+        self._legacy = legacy or entity_key == str(location.id)
         account_id = config.get("account_id", "Unknown")
-        loc_label = self.location.description or "Electric"
-        self._attr_name = (
-            f"{self.location.provider} SmartHub Energy Monthly Usage - "
-            f"{account_id} {loc_label} - {self._meter_name}"
-        )
+        if self._legacy:
+            self._attr_unique_id = f"{config_entry.unique_id}_{location.id}_energy"
+            self._attr_name = (
+                f"{self.location.provider} SmartHub Energy Monthly Usage - "
+                f"{account_id} {self.location.description}"
+            )
+        else:
+            safe_meter = normalize_meter_id(self._meter_id)
+            self._attr_unique_id = f"{config_entry.unique_id}_{location.id}_{safe_meter}_energy"
+            loc_label = self.location.description or "Electric"
+            self._attr_name = (
+                f"{self.location.provider} SmartHub Energy Monthly Usage - "
+                f"{account_id} {loc_label} - {self._meter_name}"
+            )
 
         _LOGGER.debug("Initialized SmartHub energy sensor with unique_id: %s", self._attr_unique_id)
 
@@ -474,14 +586,22 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
             ATTR_LOCATION_ID: self.location.id,
         }
 
-        attributes[METER_ID] = self._meter_id
-        attributes[METER_NAME] = self._meter_name
+        reading = {}
+        if self.coordinator.data:
+            reading = self.coordinator.data.get(self._entity_key) or {}
 
-        # Add last reading time if available
-        if self.coordinator.data and self._entity_key in self.coordinator.data:
-            last_reading = self.coordinator.data.get(self._entity_key, {}).get(ATTR_LAST_READING_TIME)
-            if last_reading:
-                attributes[ATTR_LAST_READING_TIME] = last_reading
+        # Prefer the latest coordinator payload so a sensor created before the
+        # meter id was known picks up the real meter once data arrives.
+        meter_id = reading.get(METER_ID) or self._meter_id
+        meter_name = reading.get(METER_NAME) or self._meter_name
+        if meter_id:
+            attributes[METER_ID] = meter_id
+        if meter_name:
+            attributes[METER_NAME] = meter_name
+
+        last_reading = reading.get(ATTR_LAST_READING_TIME)
+        if last_reading:
+            attributes[ATTR_LAST_READING_TIME] = last_reading
 
         return attributes
 
@@ -492,8 +612,8 @@ class SmartHubEnergySensor(CoordinatorEntity, SensorEntity):
         host = self._config.get("host", "Unknown")
 
         return {
-            "identifiers": {(DOMAIN, f"{self._config_entry.unique_id or self._config_entry.entry_id}_{self._meter_id}")},
-            "name": f"{self.location.provider} SmartHub ({account_id} - {self._meter_name})",
+            "identifiers": {(DOMAIN, self._config_entry.unique_id or self._config_entry.entry_id)},
+            "name": f"{self.location.provider} SmartHub Energy Monthly Usage ({account_id} - {self.location.description})",
             "manufacturer": "SmartHub Coop",
             "model": "Energy Monitor",
             "configuration_url": f"https://{host}",
