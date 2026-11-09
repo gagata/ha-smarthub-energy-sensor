@@ -1,6 +1,15 @@
 """Tests for utility functions."""
+import hashlib
 from zoneinfo import ZoneInfo
-from custom_components.smarthub.utils import sanitize_host, parse_epoch_set_timezone, normalize_meter_id
+
+from homeassistant.components.recorder.statistics import valid_statistic_id
+
+from custom_components.smarthub.utils import (
+    assign_unique_meter_fragments,
+    normalize_meter_id,
+    parse_epoch_set_timezone,
+    sanitize_host,
+)
 
 def test_normalize_meter_id():
     """Meter ids must become valid lowercase statistic-id fragments."""
@@ -11,6 +20,39 @@ def test_normalize_meter_id():
     assert normalize_meter_id("ok_id") == "ok_id"
     assert normalize_meter_id("---") == "meter"
     assert normalize_meter_id("") == "meter"
+
+def _suffix(meter_id: str) -> str:
+    return hashlib.sha256(meter_id.encode("utf-8")).hexdigest()[:8]
+
+def test_assign_unique_meter_fragments_keeps_non_colliding_ids():
+    """Normal ids stay on normalize_meter_id so existing statistics keep matching."""
+    assert assign_unique_meter_fragments(["1ND91111111"]) == {"1ND91111111": "1nd91111111"}
+    assert assign_unique_meter_fragments(["A-B"]) == {"A-B": "a_b"}
+    assert assign_unique_meter_fragments(["MAIN-1", "OFF-2"]) == {
+        "MAIN-1": "main_1",
+        "OFF-2": "off_2",
+    }
+    # Duplicate rows for one physical meter share one fragment.
+    assert assign_unique_meter_fragments(["MAIN-1", "MAIN-1"]) == {"MAIN-1": "main_1"}
+
+def test_assign_unique_meter_fragments_suffixes_collisions():
+    """A-B and A B must not both become a_b. The suffix is stable and order-independent."""
+    hyphen = f"a_b_{_suffix('A-B')}"
+    space = f"a_b_{_suffix('A B')}"
+    assert hyphen != space
+
+    forward = assign_unique_meter_fragments(["A-B", "A B"])
+    reverse = assign_unique_meter_fragments(["A B", "A-B"])
+    assert forward == reverse == {"A-B": hyphen, "A B": space}
+    # A third, non-colliding meter keeps its historical fragment.
+    with_other = assign_unique_meter_fragments(["A B", "OFF-2", "A-B"])
+    assert with_other["OFF-2"] == "off_2"
+    assert with_other["A-B"] == hyphen
+    assert with_other["A B"] == space
+
+    for fragment in (hyphen, space):
+        assert valid_statistic_id(f"smarthub:smarthub_energy_sensor_123_1_{fragment}")
+        assert "__" not in fragment
 
 def test_sanitize_host():
     """Test that the host is correctly sanitized."""

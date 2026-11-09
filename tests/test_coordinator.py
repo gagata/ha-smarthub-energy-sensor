@@ -10,8 +10,12 @@ from custom_components.smarthub import async_setup_entry
 from custom_components.smarthub.api import Aggregation, SmartHubAPI, SmartHubAPIError, SmartHubLocation
 from custom_components.smarthub.const import DOMAIN, ELECTRIC_SERVICE, ENERGY_SENSOR_KEY
 
-from custom_components.smarthub.sensor import SmartHubDataUpdateCoordinator
+from custom_components.smarthub.sensor import (
+    SmartHubDataUpdateCoordinator,
+    _fill_empty_usage_from_daily,
+)
 from custom_components.smarthub.sensor import async_setup_entry as async_setup_sensor
+from custom_components.smarthub.utils import assign_unique_meter_fragments
 from homeassistant.components.recorder import Recorder
 from homeassistant.components.recorder.models import (
     StatisticData,
@@ -23,8 +27,10 @@ from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     statistics_during_period,
 )
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from homeassistant.const import UnitOfEnergy
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import EnergyConverter
 
 
 from homeassistant.components.recorder import get_instance
@@ -489,6 +495,329 @@ async def test_empty_startup_keeps_lookup_key_and_adds_later_meters(
     assert extra_ids == {f"{mock_config_entry.unique_id}_11111_main_1_energy"}
     assert added[1]._entity_key == "11111_main_1"
     assert added[1].native_value == 3
+
+
+def test_fill_empty_usage_from_daily_keeps_monthly_readings():
+    """Only the empty meter is replaced with its own daily points."""
+    monthly = [
+        {"meter_id": "MAIN-1", "USAGE": [{"consumption": 40}], "legacy_meter": False, "meter_name": "Main"},
+        {"meter_id": "OFF-2", "USAGE": [], "legacy_meter": True, "meter_name": "Off Peak"},
+    ]
+    daily = [
+        {"meter_id": "MAIN-1", "USAGE": [{"consumption": 5}, {"consumption": 6}]},
+        {"meter_id": "OFF-2", "USAGE": [{"consumption": 10}, {"consumption": 1}], "meter_name": "daily name"},
+    ]
+
+    filled = _fill_empty_usage_from_daily(monthly, daily)
+
+    assert filled[0] == (monthly[0], False)
+    assert filled[1][1] is True
+    assert [point["consumption"] for point in filled[1][0]["USAGE"]] == [10, 1]
+    assert filled[1][0]["legacy_meter"] is True
+    assert filled[1][0]["meter_name"] == "Off Peak"
+    # The monthly object for the populated meter is left as it was.
+    assert monthly[0]["USAGE"] == [{"consumption": 40}]
+
+
+async def test_daily_fallback_for_individual_empty_meter(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """A meter with monthly readings must not keep an empty sibling at zero."""
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    month_start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    next_day = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    monthly = {
+        "meters": [
+            {
+                "meter_id": "MAIN-1",
+                "meter_name": "Main",
+                "USAGE": [{"reading_time": month_start, "consumption": 40}],
+                "legacy_meter": False,
+            },
+            {
+                "meter_id": "OFF-2",
+                "meter_name": "Off Peak",
+                "USAGE": [],
+                "legacy_meter": True,
+            },
+        ],
+        "USAGE": [{"reading_time": month_start, "consumption": 40}],
+    }
+    daily = {
+        "meters": [
+            {
+                "meter_id": "MAIN-1",
+                "meter_name": "Main",
+                "USAGE": [
+                    {"reading_time": month_start, "consumption": 5},
+                    {"reading_time": next_day, "consumption": 6},
+                ],
+                "legacy_meter": False,
+            },
+            {
+                "meter_id": "OFF-2",
+                "meter_name": "Off Peak",
+                "USAGE": [
+                    {"reading_time": month_start, "consumption": 10},
+                    {"reading_time": next_day, "consumption": 1},
+                ],
+                "legacy_meter": True,
+            },
+        ],
+    }
+
+    async def _get_energy_data(location=None, aggregation=None, start_datetime=None, **kwargs):
+        if aggregation == Aggregation.MONTHLY:
+            return monthly
+        return daily
+
+    mock_smarthub_api.get_energy_data.side_effect = _get_energy_data
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    data = await coordinator._async_update_data()
+
+    # MAIN keeps the monthly reading (40), not the daily sum (11).
+    assert data["11111_main_1"][ENERGY_SENSOR_KEY] == 40
+    # OFF had no monthly points, so its month-to-date is the daily sum.
+    assert data["11111"][ENERGY_SENSOR_KEY] == 11
+
+
+async def test_colliding_meter_ids_do_not_share_statistics(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """A-B and A B must get distinct statistic ids, entity keys, and unique ids."""
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    first = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    second = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    mock_smarthub_api.get_energy_data.return_value = {
+        "meters": [
+            {
+                "meter_id": "A-B",
+                "meter_name": "Hyphen",
+                "USAGE": [
+                    {"reading_time": first, "consumption": 2},
+                    {"reading_time": second, "consumption": 3},
+                ],
+                "USAGE_RETURN": [{"reading_time": first, "consumption": 4}],
+                "legacy_meter": False,
+            },
+            {
+                "meter_id": "A B",
+                "meter_name": "Space",
+                "USAGE": [
+                    {"reading_time": first, "consumption": 10},
+                    {"reading_time": second, "consumption": 1},
+                ],
+                "USAGE_RETURN": [{"reading_time": first, "consumption": 7}],
+                "legacy_meter": True,
+            },
+        ],
+    }
+    fragments = assign_unique_meter_fragments(["A-B", "A B"])
+    assert fragments["A-B"] != fragments["A B"]
+    assert fragments["A-B"] != "a_b"
+    assert fragments["A B"] != "a_b"
+
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    data = await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+
+    hyphen = f"smarthub:smarthub_energy_sensor_daily_123456_11111_{fragments['A-B']}"
+    space = f"smarthub:smarthub_energy_sensor_daily_123456_11111_{fragments['A B']}"
+    hyphen_return = f"smarthub:smarthub_energy_return_sensor_daily_123456_11111_{fragments['A-B']}"
+    space_return = f"smarthub:smarthub_energy_return_sensor_daily_123456_11111_{fragments['A B']}"
+    legacy = "smarthub:smarthub_energy_sensor_daily_123456_11111"
+    legacy_return = "smarthub:smarthub_energy_return_sensor_daily_123456_11111"
+    bare = "smarthub:smarthub_energy_sensor_daily_123456_11111_a_b"
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {hyphen, space, hyphen_return, space_return, legacy, legacy_return, bare},
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+
+    assert stats[hyphen][0]["sum"] == 2
+    assert stats[hyphen][1]["sum"] == 5
+    assert stats[space][0]["sum"] == 10
+    assert stats[space][1]["sum"] == 11
+    assert stats[legacy][0]["sum"] == 10
+    assert stats[legacy][1]["sum"] == 11
+    assert stats[hyphen_return][0]["sum"] == 4
+    assert stats[space_return][0]["sum"] == 7
+    assert stats[legacy_return][0]["sum"] == 7
+    assert bare not in stats
+
+    assert data["11111"][ENERGY_SENSOR_KEY] == 1
+    assert data[f"11111_{fragments['A-B']}"][ENERGY_SENSOR_KEY] == 3
+    assert "11111_a_b" not in data
+
+    added = []
+    coordinator.data = data
+    coordinator.last_update_success = True
+    mock_config_entry.runtime_data = coordinator
+    await async_setup_sensor(hass, mock_config_entry, lambda entities, update_before_add=False: added.extend(entities))
+    unique_ids = {entity.unique_id for entity in added}
+    assert unique_ids == {
+        f"{mock_config_entry.unique_id}_11111_energy",
+        f"{mock_config_entry.unique_id}_11111_{fragments['A-B']}_energy",
+    }
+
+
+def _statistic_metadata(statistic_id: str) -> StatisticMetaData:
+    return StatisticMetaData(
+        mean_type=StatisticMeanType.NONE,
+        has_sum=True,
+        name=statistic_id,
+        source=DOMAIN,
+        statistic_id=statistic_id,
+        unit_class=EnergyConverter.UNIT_CLASS,
+        unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    )
+
+
+def _is_wide_window(start_datetime) -> bool:
+    if start_datetime is None:
+        return False
+    if start_datetime.tzinfo is None:
+        start_datetime = start_datetime.astimezone()
+    age = datetime.now(timezone.utc) - start_datetime.astimezone(timezone.utc)
+    return age > timedelta(days=45)
+
+
+async def test_new_meter_imports_full_history_without_rewriting_existing(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """Legacy statistics must not shorten history for a meter that has none of its own.
+
+    The meter that already has statistics stays on the short window, so older
+    points from the backfill are not written over it.
+    """
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    # Midnight keeps both the hourly and daily statistic periods aligned.
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    legacy_start = now - timedelta(days=5)
+    recent_point = now - timedelta(days=1)
+    old_point = now - timedelta(days=40)
+
+    async def _seed(statistic_id: str) -> None:
+        async_add_external_statistics(
+            hass,
+            _statistic_metadata(statistic_id),
+            [StatisticData(start=legacy_start, state=5, sum=100)],
+        )
+
+    for suffix in ("", "_daily"):
+        await _seed(f"smarthub:smarthub_energy_sensor{suffix}_123456_11111")
+        await _seed(f"smarthub:smarthub_energy_sensor{suffix}_123456_11111_off_2")
+    await async_wait_recording_done(hass)
+
+    def _meters(include_old: bool) -> dict:
+        # The short window still repeats the latest stored reading. The older
+        # point exists only in the full-history response.
+        off_usage = [
+            {"reading_time": legacy_start, "consumption": 5},
+            {"reading_time": recent_point, "consumption": 2},
+        ]
+        main_usage = [{"reading_time": recent_point, "consumption": 4}]
+        if include_old:
+            off_usage.insert(0, {"reading_time": old_point, "consumption": 40})
+            main_usage.insert(0, {"reading_time": old_point, "consumption": 50})
+        return {
+            "meters": [
+                {"meter_id": "MAIN-1", "meter_name": "Main", "USAGE": main_usage, "legacy_meter": False},
+                {"meter_id": "OFF-2", "meter_name": "Off Peak", "USAGE": off_usage, "legacy_meter": True},
+            ]
+        }
+
+    calls = []
+
+    async def _get_energy_data(location=None, aggregation=None, start_datetime=None, **kwargs):
+        wide = _is_wide_window(start_datetime)
+        calls.append({"aggregation": aggregation, "wide": wide})
+        return _meters(include_old=wide)
+
+    mock_smarthub_api.get_energy_data.side_effect = _get_energy_data
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+
+    stat_calls = [call for call in calls if call["aggregation"] in (Aggregation.HOURLY, Aggregation.DAILY)]
+    assert len([call for call in stat_calls if call["wide"]]) == 2
+    assert len([call for call in stat_calls if not call["wide"]]) == 2
+
+    async def _load(statistic_ids: set[str]):
+        return await get_instance(hass).async_add_executor_job(
+            statistics_during_period,
+            hass,
+            dt_util.utc_from_timestamp(0),
+            None,
+            statistic_ids,
+            "hour",
+            None,
+            {"state", "sum"},
+        )
+
+    def _starts(rows) -> list[datetime]:
+        starts = []
+        for row in rows:
+            start = row["start"]
+            if isinstance(start, (int, float)):
+                start = datetime.fromtimestamp(start, tz=timezone.utc)
+            elif start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            else:
+                start = start.astimezone(timezone.utc)
+            starts.append(start)
+        return starts
+
+    daily_legacy = "smarthub:smarthub_energy_sensor_daily_123456_11111"
+    daily_off = "smarthub:smarthub_energy_sensor_daily_123456_11111_off_2"
+    daily_main = "smarthub:smarthub_energy_sensor_daily_123456_11111_main_1"
+    hourly_off = "smarthub:smarthub_energy_sensor_123456_11111_off_2"
+    hourly_main = "smarthub:smarthub_energy_sensor_123456_11111_main_1"
+    stats = await _load({daily_legacy, daily_off, daily_main, hourly_off, hourly_main})
+
+    def _close(start: datetime, target: datetime) -> bool:
+        return abs((start - target).total_seconds()) < 1
+
+    for existing in (daily_legacy, daily_off, hourly_off):
+        assert stats[existing][-1]["sum"] == 102
+        assert not any(_close(start, old_point) for start in _starts(stats[existing]))
+    for created in (daily_main, hourly_main):
+        assert stats[created][0]["sum"] == 50
+        assert stats[created][-1]["sum"] == 54
+        assert any(_close(start, old_point) for start in _starts(stats[created]))
+
+    calls.clear()
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+    second_stat_calls = [call for call in calls if call["aggregation"] in (Aggregation.HOURLY, Aggregation.DAILY)]
+    assert [call for call in second_stat_calls if call["wide"]] == []
+
+    again = await _load({daily_legacy, daily_off, daily_main, hourly_off, hourly_main})
+    assert again[daily_legacy][-1]["sum"] == 102
+    assert again[daily_off][-1]["sum"] == 102
+    assert again[daily_main][-1]["sum"] == 54
+    assert again[hourly_main][-1]["sum"] == 54
+    assert not any(_close(start, old_point) for start in _starts(again[daily_off]))
 
 
 async def async_wait_recording_done(hass) -> None:
