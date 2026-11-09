@@ -181,6 +181,63 @@ def test_parse_usage_fifteen_min(api_instance):
     assert result["USAGE"][0]["consumption"] == 1112.0
     assert result["USAGE"][0]["raw_timestamp"] == 1762218000000
 
+def test_parse_usage_keeps_every_forward_meter_and_return(api_instance):
+    """FORWARD meters stay separate; RETURN is attached to the matching meter.
+
+    Top-level USAGE stays on the last FORWARD meter, which is what the
+    integration used to keep when it overwrote a single series id.
+    """
+    test_data = {
+        "data": {
+            "ELECTRIC": [
+                {
+                    "type": "USAGE",
+                    "meters": [
+                        {"meterNumber": "MAIN-1", "seriesId": "series-main", "flowDirection": "FORWARD"},
+                        {"meterNumber": "OFF-2", "seriesId": "series-off", "flowDirection": "FORWARD"},
+                        {"meterNumber": "MAIN-1", "seriesId": "series-ret", "flowDirection": "RETURN"},
+                    ],
+                    "series": [
+                        {
+                            "name": "series-main",
+                            "data": [
+                                {"x": 1762218000000, "y": 10},
+                                {"x": 1762221600000, "y": 1},
+                            ],
+                        },
+                        {
+                            "name": "series-off",
+                            "data": [
+                                {"x": 1762218000000, "y": 7},
+                                {"x": 1762221600000, "y": 4},
+                            ],
+                        },
+                        {
+                            "name": "series-ret",
+                            "data": [
+                                {"x": 1762218000000, "y": 2},
+                                {"x": 1762221600000, "y": 0.5},
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+    }
+
+    result = api_instance.parse_usage(test_data)
+
+    assert [meter["meter_id"] for meter in result["meters"]] == ["MAIN-1", "OFF-2"]
+    assert result["USAGE"][0]["consumption"] == 7
+    assert result["meters"][0]["USAGE"][0]["consumption"] == 10
+    assert result["meters"][0]["USAGE_RETURN"][0]["consumption"] == 2
+    assert "USAGE_RETURN" not in result["meters"][1]
+    assert result["meters"][1]["legacy_meter"] is True
+    assert result["meters"][0]["legacy_meter"] is False
+    # Location-level export statistic still follows the single RETURN series.
+    assert result["USAGE_RETURN"][0]["consumption"] == 2
+    assert result["meters"][1]["legacy_usage_return"][0]["consumption"] == 2
+
 def test_parse_usage_no_data(api_instance):
     """Test parsing when no usage data is available."""
     test_data = {"data": {"ELECTRIC": []}}
