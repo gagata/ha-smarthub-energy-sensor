@@ -36,23 +36,33 @@ def test_assign_unique_meter_fragments_keeps_non_colliding_ids():
     assert assign_unique_meter_fragments(["MAIN-1", "MAIN-1"]) == {"MAIN-1": "main_1"}
 
 def test_assign_unique_meter_fragments_suffixes_collisions():
-    """A-B and A B must not both become a_b. The suffix is stable and order-independent."""
+    """Two new colliding ids stay distinct. The smaller raw id keeps the base."""
     hyphen = f"a_b_{_suffix('A-B')}"
-    space = f"a_b_{_suffix('A B')}"
-    assert hyphen != space
-
-    forward = assign_unique_meter_fragments(["A-B", "A B"])
-    reverse = assign_unique_meter_fragments(["A B", "A-B"])
-    assert forward == reverse == {"A-B": hyphen, "A B": space}
-    # A third, non-colliding meter keeps its historical fragment.
-    with_other = assign_unique_meter_fragments(["A B", "OFF-2", "A-B"])
+    assert assign_unique_meter_fragments(["A-B", "A B"]) == {"A B": "a_b", "A-B": hyphen}
+    assert assign_unique_meter_fragments(["A B", "A-B"]) == {"A B": "a_b", "A-B": hyphen}
+    with_other = assign_unique_meter_fragments(["A-B", "OFF-2", "A B"])
     assert with_other["OFF-2"] == "off_2"
+    assert with_other["A B"] == "a_b"
     assert with_other["A-B"] == hyphen
-    assert with_other["A B"] == space
+    assert valid_statistic_id(f"smarthub:smarthub_energy_sensor_123_1_{hyphen}")
+    assert "__" not in hyphen
 
-    for fragment in (hyphen, space):
-        assert valid_statistic_id(f"smarthub:smarthub_energy_sensor_123_1_{fragment}")
-        assert "__" not in fragment
+def test_saved_meter_fragment_does_not_change_when_colliders_come_and_go():
+    """A fragment, once assigned, stays put if another meter appears or leaves."""
+    first = assign_unique_meter_fragments(["A-B"])
+    assert first == {"A-B": "a_b"}
+
+    both = assign_unique_meter_fragments(["A B", "A-B"], saved=first)
+    assert both["A-B"] == "a_b"
+    assert both["A B"] == f"a_b_{_suffix('A B')}"
+
+    # The original meter does not revert or get renamed when the collider leaves.
+    assert assign_unique_meter_fragments(["A-B"], saved=both) == {"A-B": "a_b"}
+    # The suffixed meter keeps the suffix even when it is the only one left.
+    assert assign_unique_meter_fragments(["A B"], saved=both) == {"A B": both["A B"]}
+    # A saved fragment stays reserved while its meter is absent.
+    newcomer = assign_unique_meter_fragments(["A_B"], saved={"A-B": "a_b"})
+    assert newcomer["A_B"] != "a_b"
 
 def test_sanitize_host():
     """Test that the host is correctly sanitized."""

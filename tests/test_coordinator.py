@@ -801,8 +801,7 @@ async def test_colliding_meter_ids_do_not_share_statistics(
     }
     fragments = assign_unique_meter_fragments(["A-B", "A B"])
     assert fragments["A-B"] != fragments["A B"]
-    assert fragments["A-B"] != "a_b"
-    assert fragments["A B"] != "a_b"
+    assert "a_b" in fragments.values()
 
     coordinator = SmartHubDataUpdateCoordinator(
         hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
@@ -837,7 +836,9 @@ async def test_colliding_meter_ids_do_not_share_statistics(
     assert stats[hyphen_return][0]["sum"] == 4
     assert stats[space_return][0]["sum"] == 7
     assert stats[legacy_return][0]["sum"] == 7
-    assert bare not in stats
+    # The unsuffixed id belongs to whichever meter claimed it first. It is not
+    # a third series that mixes both meters.
+    assert bare in {space, hyphen}
 
     assert data["11111"][ENERGY_SENSOR_KEY] == 1
     assert data[f"11111_{fragments['A-B']}"][ENERGY_SENSOR_KEY] == 3
@@ -997,6 +998,193 @@ async def test_new_meter_imports_full_history_without_rewriting_existing(
     assert again[daily_main][-1]["sum"] == 54
     assert again[hourly_main][-1]["sum"] == 54
     assert not any(_close(start, old_point) for start in _starts(again[daily_off]))
+
+
+def _reading(start: datetime, consumption: float) -> dict:
+    return {"reading_time": start, "consumption": consumption}
+
+
+async def test_return_reading_is_not_skipped_when_consumption_has_that_timestamp(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """Export data that shows up after consumption for the same hour is stored."""
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    first = datetime(2025, 11, 3, 0, 0, tzinfo=timezone.utc)
+    second = datetime(2025, 11, 3, 1, 0, tzinfo=timezone.utc)
+    phase = {"with_return": False}
+
+    async def _get_energy_data(location=None, aggregation=None, start_datetime=None, **kwargs):
+        meter = {
+            "meter_id": "MAIN-1",
+            "meter_name": "Main",
+            "USAGE": [_reading(first, 10), _reading(second, 1)],
+            "legacy_meter": True,
+        }
+        if phase["with_return"]:
+            meter["USAGE_RETURN"] = [_reading(second, 4)]
+        return {"meters": [meter]}
+
+    mock_smarthub_api.get_energy_data.side_effect = _get_energy_data
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+
+    phase["with_return"] = True
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+
+    consumption_id = "smarthub:smarthub_energy_sensor_daily_123456_11111_main_1"
+    return_id = "smarthub:smarthub_energy_return_sensor_daily_123456_11111_main_1"
+    legacy_return = "smarthub:smarthub_energy_return_sensor_daily_123456_11111"
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {consumption_id, return_id, legacy_return},
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+    assert stats[consumption_id][0]["sum"] == 10
+    assert stats[consumption_id][-1]["sum"] == 11
+    assert stats[return_id][-1]["state"] == 4
+    assert stats[return_id][-1]["sum"] == 4
+    assert stats[legacy_return][-1]["sum"] == 4
+
+
+async def test_overlap_rewrites_a_corrected_reading_without_double_counting(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """A utility correction inside the overlap replaces the stored sum."""
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    older = now - timedelta(days=10)
+    corrected_at = now - timedelta(days=1)
+
+    async def _seed(statistic_id: str) -> None:
+        async_add_external_statistics(
+            hass,
+            _statistic_metadata(statistic_id),
+            [
+                StatisticData(start=older, state=100, sum=100),
+                StatisticData(start=corrected_at, state=4, sum=104),
+            ],
+        )
+
+    for suffix in ("", "_daily"):
+        await _seed(f"smarthub:smarthub_energy_sensor{suffix}_123456_11111")
+        await _seed(f"smarthub:smarthub_energy_sensor{suffix}_123456_11111_off_2")
+    await async_wait_recording_done(hass)
+
+    async def _get_energy_data(location=None, aggregation=None, start_datetime=None, **kwargs):
+        return {
+            "meters": [{
+                "meter_id": "OFF-2",
+                "meter_name": "Off Peak",
+                "USAGE": [_reading(corrected_at, 9)],
+                "legacy_meter": True,
+            }]
+        }
+
+    mock_smarthub_api.get_energy_data.side_effect = _get_energy_data
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+
+    daily_off = "smarthub:smarthub_energy_sensor_daily_123456_11111_off_2"
+    hourly_off = "smarthub:smarthub_energy_sensor_123456_11111_off_2"
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {daily_off, hourly_off},
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+    for statistic_id in (daily_off, hourly_off):
+        assert stats[statistic_id][0]["sum"] == 100
+        assert stats[statistic_id][0]["state"] == 100
+        assert stats[statistic_id][-1]["state"] == 9
+        assert stats[statistic_id][-1]["sum"] == 109
+
+
+async def test_meter_fragment_stays_when_a_colliding_meter_appears(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """A-B keeps a_b after A B appears, and still keeps it after a reload."""
+    mock_smarthub_api.get_service_locations.return_value = [_location()]
+    hour = datetime(2025, 11, 4, 0, 0, tzinfo=timezone.utc)
+    phase = {"both": False}
+
+    async def _get_energy_data(location=None, aggregation=None, start_datetime=None, **kwargs):
+        meters = [{
+            "meter_id": "A-B",
+            "meter_name": "Hyphen",
+            "USAGE": [_reading(hour, 2)],
+            "legacy_meter": not phase["both"],
+        }]
+        if phase["both"]:
+            meters.append({
+                "meter_id": "A B",
+                "meter_name": "Space",
+                "USAGE": [_reading(hour, 10)],
+                "legacy_meter": True,
+            })
+        return {"meters": meters}
+
+    mock_smarthub_api.get_energy_data.side_effect = _get_energy_data
+    coordinator = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+    assert coordinator._meter_fragments["11111:A-B"] == "a_b"
+
+    phase["both"] = True
+    await coordinator._async_update_data()
+    await async_wait_recording_done(hass)
+    assert coordinator._meter_fragments["11111:A-B"] == "a_b"
+    space_fragment = coordinator._meter_fragments["11111:A B"]
+    assert space_fragment != "a_b"
+    assert space_fragment.startswith("a_b_")
+
+    original = "smarthub:smarthub_energy_sensor_daily_123456_11111_a_b"
+    space_id = f"smarthub:smarthub_energy_sensor_daily_123456_11111_{space_fragment}"
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {original, space_id},
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+    assert stats[original][-1]["sum"] == 2
+    assert stats[space_id][-1]["sum"] == 10
+
+    reloaded = SmartHubDataUpdateCoordinator(
+        hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry
+    )
+    await reloaded._async_load_fragments()
+    assert reloaded._meter_fragments["11111:A-B"] == "a_b"
+    assert reloaded._meter_fragments["11111:A B"] == space_fragment
 
 
 async def async_wait_recording_done(hass) -> None:

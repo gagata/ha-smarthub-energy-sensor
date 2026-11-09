@@ -75,10 +75,15 @@ def _raw_meter_id(meter: Dict[str, Any], location_id: str) -> str:
     return str(meter.get("meter_id") or location_id)
 
 
-def _fragments_for_meters(meters: list, location_id: str) -> dict[str, str]:
+def _fragments_for_meters(
+    meters: list,
+    location_id: str,
+    saved: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Unique statistic fragments for the meters in one response."""
     return assign_unique_meter_fragments(
-        _raw_meter_id(meter, location_id) for meter in meters
+        (_raw_meter_id(meter, location_id) for meter in meters),
+        saved=saved,
     )
 
 
@@ -156,13 +161,29 @@ def _statistic_id(
     return statistic_id
 
 
-def _accumulate_statistics(readings, running_sum: float, last_time):
-    """Build external statistic points strictly after ``last_time``."""
+# Re-import this much history before the newest stored point so a utility
+# correction inside the fetch overlap replaces the stored row.
+_STATISTIC_OVERLAP = timedelta(days=2)
+
+def _accumulate_statistics(readings, running_sum: float, reimport_from):
+    """Build statistic points from ``reimport_from`` onward.
+
+    ``running_sum`` is the cumulative sum just before the first point that
+    will be written. Passing ``None`` for ``reimport_from`` imports every
+    reading, which is a series that has no stored history yet. Points before
+    ``reimport_from`` stay as they are, so older totals are not added twice.
+    """
     total = running_sum
     statistics = []
-    for reading in readings or []:
+    ordered = sorted(
+        readings or [],
+        key=lambda reading: _as_utc_datetime(reading["reading_time"]) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+    for reading in ordered:
         start = _as_utc_datetime(reading["reading_time"])
-        if last_time is not None and start <= last_time:
+        if start is None:
+            continue
+        if reimport_from is not None and start < reimport_from:
             continue
         value = float(reading.get("consumption") or 0)
         if value < 0:
@@ -175,8 +196,10 @@ from homeassistant.util.unit_conversion import EnergyConverter
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.components.recorder import get_instance
+from homeassistant.helpers.storage import Store
 from homeassistant.components.recorder.models import (
     StatisticData,
     StatisticMetaData,
@@ -216,6 +239,8 @@ from .utils import assign_unique_meter_fragments, normalize_meter_id
 _LOGGER = logging.getLogger(__name__)
 # Coordinator field: disambiguated statistic fragment for this meter's raw id.
 _METER_FRAGMENT = "meter_fragment"
+# Storage key suffix. The config entry id is appended so accounts do not share a map.
+_METER_FRAGMENT_STORE = "meter_fragments"
 
 
 async def async_setup_entry(
@@ -290,12 +315,62 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=update_interval,
         )
         self.api = api
+        self.config_entry = config_entry
         self.account_id = config_entry.data.get('account_id','unknown')
+        self._meter_fragments: dict[str, str] = {}
+        self._fragments_loaded = False
+        entry_id = getattr(config_entry, "entry_id", None) or "unknown"
+        self._fragment_store = Store(
+            hass,
+            1,
+            f"{DOMAIN}_{_METER_FRAGMENT_STORE}_{entry_id}",
+        )
+
+    async def _async_load_fragments(self) -> None:
+        """Load persisted meter fragments once per coordinator lifetime."""
+        if self._fragments_loaded:
+            return
+        self._fragments_loaded = True
+        stored = await self._fragment_store.async_load()
+        if not isinstance(stored, dict):
+            return
+        raw = stored.get("fragments") or {}
+        if isinstance(raw, dict):
+            self._meter_fragments = {
+                str(key): str(fragment)
+                for key, fragment in raw.items()
+                if fragment
+            }
+
+    def _saved_fragments_for_location(self, location_id: str) -> dict[str, str]:
+        """Return raw meter id -> fragment already given out at this location."""
+        prefix = f"{location_id}:"
+        return {
+            key[len(prefix):]: fragment
+            for key, fragment in self._meter_fragments.items()
+            if key.startswith(prefix)
+        }
+
+    async def _assign_fragments(self, location_id: str, meters: list) -> dict[str, str]:
+        """Assign fragments, keeping any id this location has already published."""
+        await self._async_load_fragments()
+        saved = self._saved_fragments_for_location(location_id)
+        assigned = _fragments_for_meters(meters, location_id, saved)
+        changed = False
+        for raw, fragment in assigned.items():
+            key = f"{location_id}:{raw}"
+            if self._meter_fragments.get(key) != fragment:
+                self._meter_fragments[key] = fragment
+                changed = True
+        if changed:
+            await self._fragment_store.async_save({"fragments": self._meter_fragments})
+        return assigned
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from the SmartHub API."""
         try:
             _LOGGER.debug("Fetching data from SmartHub API")
+            await self._async_load_fragments()
 
             # force a logout of the session
             self.api.token = None
@@ -370,7 +445,9 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                   }
                   continue
 
-              fragments = _fragments_for_meters([meter for meter, _use_daily in paired], location.id)
+              fragments = await self._assign_fragments(
+                  location.id, [meter for meter, _use_daily in paired]
+              )
               for meter, use_daily_sum in paired:
                   usage = meter.get("USAGE") or []
                   meter_id = _raw_meter_id(meter, location.id)
@@ -496,7 +573,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
         # would hide older points for a meter that has no statistics yet.
         narrow = legacy_start is not None and _is_later(window_start, full_start)
         if narrow:
-            fragments = _fragments_for_meters(meter_list, location.id)
+            fragments = await self._assign_fragments(location.id, meter_list)
             needs_full = await self._meters_missing_statistics(
                 location, aggregation, meter_list, fragments, protect_legacy=True
             )
@@ -509,7 +586,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                     full_by_id.setdefault(raw, meter)
                     if raw not in recent_by_id:
                         meter_list.append(full_by_id[raw])
-                fragments = _fragments_for_meters(meter_list, location.id)
+                fragments = await self._assign_fragments(location.id, meter_list)
                 needs_full = await self._meters_missing_statistics(
                     location, aggregation, meter_list, fragments, protect_legacy=True
                 )
@@ -521,7 +598,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                         location,
                     )
         else:
-            fragments = _fragments_for_meters(meter_list, location.id)
+            fragments = await self._assign_fragments(location.id, meter_list)
             needs_full = set()
 
         if _usages_empty(meter_list) and not _has_return_points(meter_list):
@@ -552,31 +629,85 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                 location, aggregation, source, fragment, write_legacy=write_legacy
             )
 
-    async def _async_sum_baseline(self, consumption_id: str, return_id: str):
-        """Return ``(consumption_sum, return_sum, last_start)`` or None if the series is new.
-
-        The cursor is the newest stored consumption statistic. Readings at or
-        before that time are left alone, so a later import cannot add them
-        again. A daily period bucket is not used as the cursor: its start can
-        sit before the stored reading and would count that reading twice.
-        """
+    async def _async_last_record(self, statistic_id: str) -> dict | None:
+        """Return the newest stored row for one statistic id, or None."""
         last_stat = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics, self.hass, 1, consumption_id, True, {"sum"}
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum", "state"}
         )
-        if not last_stat or consumption_id not in last_stat:
+        if not last_stat or not last_stat.get(statistic_id):
             return None
+        return last_stat[statistic_id][0]
 
-        record = last_stat[consumption_id][0]
-        last_start = _as_utc_datetime(record.get("start"))
-        last_sum = float(record.get("sum") or 0.0)
-
-        return_sum = 0.0
-        return_stat = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics, self.hass, 1, return_id, True, {"sum"}
+    async def _async_statistics_between(self, statistic_id: str, start: datetime, end: datetime) -> list:
+        """Return hourly statistic rows in ``[start, end)``."""
+        rows = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            start,
+            end,
+            {statistic_id},
+            "hour",
+            None,
+            {"sum", "state"},
         )
-        if return_stat and return_stat.get(return_id):
-            return_sum = float(return_stat[return_id][0].get("sum") or 0.0)
-        return (last_sum, return_sum, last_start)
+        return list((rows or {}).get(statistic_id) or [])
+
+    async def _async_reimport_plan(
+        self,
+        statistic_id: str,
+        readings: list,
+        seed_id: str | None = None,
+    ) -> tuple[float, datetime | None]:
+        """Return ``(sum_before_first_rewrite, reimport_from)`` for one series.
+
+        Consumption and return are planned separately. A return reading is
+        therefore not dropped just because consumption already has that
+        timestamp. Inside the overlap, stored rows are rewritten from the
+        sum just before the first rewritten reading, so a corrected value
+        replaces the old one instead of being added on top of it.
+        """
+        source_id = statistic_id
+        last = await self._async_last_record(statistic_id)
+        if last is None and seed_id:
+            seeded = await self._async_last_record(seed_id)
+            if seeded is not None:
+                source_id = seed_id
+                last = seeded
+        if last is None:
+            return (0.0, None)
+
+        last_start = _as_utc_datetime(last.get("start"))
+        if last_start is None:
+            return (0.0, None)
+        overlap_start = last_start - _STATISTIC_OVERLAP
+        candidates = []
+        for reading in readings or []:
+            start = _as_utc_datetime(reading.get("reading_time"))
+            if start is not None and start >= overlap_start:
+                candidates.append(start)
+        if not candidates:
+            # Nothing in the overlap to append or correct.
+            return (float(last.get("sum") or 0.0), last_start + timedelta(microseconds=1))
+
+        first = min(candidates)
+        earlier = await self._async_statistics_between(
+            source_id,
+            first - timedelta(days=HISTORICAL_IMPORT_DAYS + _STATISTIC_OVERLAP.days),
+            first,
+        )
+        if earlier:
+            return (float(earlier[-1].get("sum") or 0.0), first)
+
+        at_first = await self._async_statistics_between(
+            source_id, first, first + timedelta(seconds=1)
+        )
+        if at_first:
+            stored_sum = float(at_first[0].get("sum") or 0.0)
+            stored_state = float(at_first[0].get("state") or 0.0)
+            # No earlier row. The stored sum still includes history that this
+            # point does not repeat, so continue from sum-before-this-point.
+            return (stored_sum - stored_state, first)
+        return (0.0, first)
 
     async def _insert_meter_statistics(
         self,
@@ -641,20 +772,19 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             unit_of_measurement=consumption_unit,
         )
 
-        per_meter_baseline = await self._async_sum_baseline(
-            consumption_statistic_id, return_statistic_id
+        # A brand-new per-meter series continues the legacy running sum so the
+        # first import does not restart at zero. Each channel keeps its own
+        # cursor: a return point is not skipped because consumption is ahead.
+        seed_consumption = legacy_consumption_id if is_legacy else None
+        seed_return = legacy_return_id if is_legacy else None
+        consumption_sum, consumption_from = await self._async_reimport_plan(
+            consumption_statistic_id, usage_points, seed_consumption
         )
-        legacy_baseline = None
-        if is_legacy:
-            legacy_baseline = await self._async_sum_baseline(
-                legacy_consumption_id, legacy_return_id
-            )
-
-        # Seed a brand-new per-meter series from the legacy sum so the first
-        # import does not restart the running total at zero.
-        used = per_meter_baseline or legacy_baseline or (0.0, 0.0, None)
-        consumption_statistics = _accumulate_statistics(usage_points, used[0], used[2])
-        return_statistics = _accumulate_statistics(return_points, used[1], used[2])
+        return_sum, return_from = await self._async_reimport_plan(
+            return_statistic_id, return_points, seed_return
+        )
+        consumption_statistics = _accumulate_statistics(usage_points, consumption_sum, consumption_from)
+        return_statistics = _accumulate_statistics(return_points, return_sum, return_from)
 
         if consumption_statistics:
             _LOGGER.info("Adding %s statistics for %s", len(consumption_statistics), consumption_statistic_id)
@@ -666,17 +796,18 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
         if not is_legacy:
             return
 
-        if legacy_baseline and legacy_baseline != used:
-            legacy_consumption = _accumulate_statistics(usage_points, legacy_baseline[0], legacy_baseline[2])
-            legacy_return = _accumulate_statistics(legacy_return_points, legacy_baseline[1], legacy_baseline[2])
-        else:
-            legacy_consumption = consumption_statistics
-            # Same baseline: rebuild return points when the legacy series is a
-            # different RETURN channel than this meter's own export series.
-            if legacy_return_points is return_points:
-                legacy_return = return_statistics
-            else:
-                legacy_return = _accumulate_statistics(legacy_return_points, used[1], used[2])
+        legacy_consumption_sum, legacy_consumption_from = await self._async_reimport_plan(
+            legacy_consumption_id, usage_points
+        )
+        legacy_return_sum, legacy_return_from = await self._async_reimport_plan(
+            legacy_return_id, legacy_return_points
+        )
+        legacy_consumption = _accumulate_statistics(
+            usage_points, legacy_consumption_sum, legacy_consumption_from
+        )
+        legacy_return = _accumulate_statistics(
+            legacy_return_points, legacy_return_sum, legacy_return_from
+        )
 
         description = location.description if location.description != "" else meter_name
         legacy_name = f"{self.account_id} - {description}"

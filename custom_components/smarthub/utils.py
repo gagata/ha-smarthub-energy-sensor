@@ -31,16 +31,21 @@ def _collision_suffix(meter_id: str) -> str:
     digest = hashlib.sha256(str(meter_id).encode("utf-8")).hexdigest()
     return digest[:_COLLISION_SUFFIX_LEN]
 
-def assign_unique_meter_fragments(meter_ids: Iterable[str]) -> dict[str, str]:
+def assign_unique_meter_fragments(
+    meter_ids: Iterable[str],
+    saved: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Map each raw meter id to a unique statistic-id fragment.
 
-    Ids that do not share a normalized form keep :func:`normalize_meter_id`
-    unchanged, so existing statistics and entity ids stay valid.
+    Fragments already stored in ``saved`` are kept as-is, including when the
+    other meter that caused a collision later disappears. A meter with no
+    saved fragment keeps :func:`normalize_meter_id` when that fragment is
+    still free. Only a newly discovered meter whose base is already taken
+    gets ``{base}_{suffix}``.
 
-    When several raw ids collapse together (``A-B`` and ``A B`` both become
-    ``a_b``), every id in that group gets ``{base}_{suffix}``. The suffix is
-    a hash of the original id, so it does not depend on discovery order and
-    does not change when another colliding meter appears later.
+    On the first sight of two colliding ids, the lexicographically smaller
+    raw id claims the unsuffixed base and the other gets the suffix. That
+    choice is then what ``saved`` should remember.
     """
     ordered: list[str] = []
     seen: set[str] = set()
@@ -51,29 +56,25 @@ def assign_unique_meter_fragments(meter_ids: Iterable[str]) -> dict[str, str]:
         seen.add(raw)
         ordered.append(raw)
 
-    bases = {raw: normalize_meter_id(raw) for raw in ordered}
-    counts: dict[str, int] = {}
-    for base in bases.values():
-        counts[base] = counts.get(base, 0) + 1
-
+    remembered = {str(raw): str(fragment) for raw, fragment in (saved or {}).items() if fragment}
     fragments: dict[str, str] = {}
-    used: set[str] = set()
+    used: set[str] = set(remembered.values())
     for raw in ordered:
-        base = bases[raw]
-        if counts[base] == 1:
-            fragments[raw] = base
-            used.add(base)
+        if raw in remembered:
+            fragments[raw] = remembered[raw]
 
     for raw in sorted(raw for raw in ordered if raw not in fragments):
-        base = bases[raw]
-        fragment = f"{base}_{_collision_suffix(raw)}"
-        candidate = fragment
-        extra = 2
-        while candidate in used:
-            candidate = f"{fragment}_{extra}"
-            extra += 1
-        fragments[raw] = candidate
-        used.add(candidate)
+        base = normalize_meter_id(raw)
+        if base not in used:
+            fragment = base
+        else:
+            fragment = f"{base}_{_collision_suffix(raw)}"
+            extra = 2
+            while fragment in used:
+                fragment = f"{fragment}_{extra}"
+                extra += 1
+        fragments[raw] = fragment
+        used.add(fragment)
     return fragments
 
 def sanitize_host(host: str) -> str:
