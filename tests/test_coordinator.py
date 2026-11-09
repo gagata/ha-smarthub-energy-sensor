@@ -315,6 +315,185 @@ async def test_coordinator_first_run_return_meter(
     assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][0]["sum"] == 5
     assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][1]["sum"] == 6
 
+async def test_coordinator_first_run_reverse_meter(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """Test the coordinator on its first run with a REVERSE-labeled generation
+    meter, as returned by SECO Energy's SmartHub (flowDirection: 'REVERSE'
+    instead of 'RETURN' for the same generation/export role). Identical
+    fixture to test_coordinator_first_run_return_meter other than the
+    flowDirection label -- same expected output, since REVERSE and RETURN
+    both route to return_series."""
+    mock_smarthub_api.get_service_locations.return_value = [
+      SmartHubLocation(
+        id="11111",
+        service=ELECTRIC_SERVICE,
+        description="test location",
+        provider="test provider",
+      )
+    ]
+
+    test_data = {
+        "data": {
+            "ELECTRIC": [
+                {
+                    "type": "USAGE",
+                    "meters": [
+                     {'meterNumber': '1ND91111111', 'seriesId': '1ND87334444', 'flowDirection': 'REVERSE', 'isNetMeter': False}, # Includes in and out bound flows (posirive/negative)
+                     {'meterNumber': '1ND91111111', 'seriesId': '1ND86200137', 'flowDirection': 'FORWARD', 'isNetMeter': False}, # Forward meter is full consumption.
+                    ],
+                    "series": [
+                        {
+                            "meterNumber": "1ND86200137", "name": "1ND86200137",
+                            "data": [
+                                {"x": 1762215300000, "y":   1},
+                                {"x": 1762216200000, "y":  10},
+                                {"x": 1762217100000, "y": 100},
+                                {"x": 1762218900000, "y": 1},
+                                {"x": 1762219800000, "y": 1},
+                            ]
+                        },
+                        {
+                            "meterNumber": "1ND87334444", "name": "1ND87334444",
+                            "data": [
+                                {"x": 1762215300000, "y":   0},
+                                {"x": 1762216200000, "y":  5}, # generated 15 KW of power this hour - returned 5 to the grid
+                                {"x": 1762217100000, "y": 0},
+                                {"x": 1762218900000, "y": 0},
+                                {"x": 1762219800000, "y":  1}, # generated 2 KW of power this hour - returned 1 to the grid
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+    }
+
+    mock_smarthub_api.get_energy_data.return_value = mock_smarthub_api.parse_usage(test_data)
+    assert mock_smarthub_api.get_energy_data.return_value["USAGE_RETURN"][0]['consumption'] == 5
+    assert mock_smarthub_api.get_energy_data.return_value["USAGE_RETURN"][1]['consumption'] == 1
+
+    coordinator = SmartHubDataUpdateCoordinator(hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry)
+
+    await coordinator._async_update_data()
+
+    await async_wait_recording_done(hass)
+
+    # Check stats for electric account '111111'
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {
+            "smarthub:smarthub_energy_sensor_daily_123456_11111",
+            "smarthub:smarthub_energy_return_sensor_daily_123456_11111",
+        },
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+
+    # The first hour's statistics summary is...
+    assert stats["smarthub:smarthub_energy_sensor_daily_123456_11111"][0]["sum"] == 111.0
+    assert stats["smarthub:smarthub_energy_sensor_daily_123456_11111"][1]["sum"] == 113.0
+    assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][0]["sum"] == 5
+    assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][1]["sum"] == 6
+
+
+
+async def test_coordinator_first_run_reverse_meter_negative_values(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_smarthub_api: AsyncMock,
+) -> None:
+    """Test the coordinator on its first run with a REVERSE-labeled generation
+    meter whose readings are reported as NEGATIVE deltas, as SECO Energy's
+    SmartHub actually does in production (confirmed via live debug logging --
+    e.g. -24.73, -15.38, -0.67 for a day's generation). test_coordinator_first_run_reverse_meter
+    above uses artificially positive test data, which meant it never caught
+    that parse_usage_series' value-sign handling treated ParseType.RETURN
+    identically to FORWARD (max(0, usage_energy)), silently clamping every
+    negative generation reading to zero and permanently zeroing out the
+    return/generation statistic. This test uses realistic negative data and
+    asserts the parsed/stored values are the positive magnitude, not zero."""
+    mock_smarthub_api.get_service_locations.return_value = [
+      SmartHubLocation(
+        id="11111",
+        service=ELECTRIC_SERVICE,
+        description="test location",
+        provider="test provider",
+      )
+    ]
+
+    test_data = {
+        "data": {
+            "ELECTRIC": [
+                {
+                    "type": "USAGE",
+                    "meters": [
+                     {'meterNumber': '1ND91111111', 'seriesId': '1ND87334444', 'flowDirection': 'REVERSE', 'isNetMeter': False},
+                     {'meterNumber': '1ND91111111', 'seriesId': '1ND86200137', 'flowDirection': 'FORWARD', 'isNetMeter': False},
+                    ],
+                    "series": [
+                        {
+                            "meterNumber": "1ND86200137", "name": "1ND86200137",
+                            "data": [
+                                {"x": 1762215300000, "y":   1},
+                                {"x": 1762216200000, "y":  10},
+                                {"x": 1762217100000, "y": 100},
+                                {"x": 1762218900000, "y": 1},
+                                {"x": 1762219800000, "y": 1},
+                            ]
+                        },
+                        {
+                            "meterNumber": "1ND87334444", "name": "1ND87334444",
+                            "data": [
+                                {"x": 1762215300000, "y":   0},
+                                {"x": 1762216200000, "y":  -5}, # generated 15 KW of power this hour - returned 5 to the grid (reported as negative, like real SECO data)
+                                {"x": 1762217100000, "y": 0},
+                                {"x": 1762218900000, "y": 0},
+                                {"x": 1762219800000, "y":  -1}, # generated 2 KW of power this hour - returned 1 to the grid (reported as negative)
+                            ]
+                        },
+                    ]
+                }
+            ]
+        }
+    }
+
+    mock_smarthub_api.get_energy_data.return_value = mock_smarthub_api.parse_usage(test_data)
+    assert mock_smarthub_api.get_energy_data.return_value["USAGE_RETURN"][0]['consumption'] == 5
+    assert mock_smarthub_api.get_energy_data.return_value["USAGE_RETURN"][1]['consumption'] == 1
+
+    coordinator = SmartHubDataUpdateCoordinator(hass, api=mock_smarthub_api, update_interval=timedelta(minutes=720), config_entry=mock_config_entry)
+
+    await coordinator._async_update_data()
+
+    await async_wait_recording_done(hass)
+
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        dt_util.utc_from_timestamp(0),
+        None,
+        {
+            "smarthub:smarthub_energy_sensor_daily_123456_11111",
+            "smarthub:smarthub_energy_return_sensor_daily_123456_11111",
+        },
+        "hour",
+        None,
+        {"state", "sum"},
+    )
+
+    assert stats["smarthub:smarthub_energy_sensor_daily_123456_11111"][0]["sum"] == 111.0
+    assert stats["smarthub:smarthub_energy_sensor_daily_123456_11111"][1]["sum"] == 113.0
+    assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][0]["sum"] == 5
+    assert stats["smarthub:smarthub_energy_return_sensor_daily_123456_11111"][1]["sum"] == 6
 
 
 def _location():

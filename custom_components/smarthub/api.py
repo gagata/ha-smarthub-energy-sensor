@@ -48,6 +48,7 @@ class ParseType(StrEnum):
     FORWARD = "FORWARD"
     NET = "NET"
     RETURN = "RETURN"
+    REVERSE = "REVERSE"
     TOTAL = "TOTAL"
 
 class Aggregation(StrEnum):
@@ -169,7 +170,11 @@ class SmartHubAPI:
                 usage_energy = 0
               else:
                 usage_energy = abs(usage_energy)
-            else: # both FORWARD and RETURN use postive values
+            elif parseType == ParseType.RETURN:
+              # SECO (and likely other utilities) report the REVERSE/RETURN meter's
+              # generation series as negative deltas, not positive - take the magnitude.
+              usage_energy = abs(usage_energy)
+            else: # FORWARD uses positive values only
               usage_energy = max(0,usage_energy)
 
 
@@ -233,7 +238,10 @@ class SmartHubAPI:
                         case ParseType.NET:
                           net_meter = meter
                           net_series = meter["seriesId"]
-                        case ParseType.RETURN:
+                        # REVERSE is the export/generation direction some co-ops
+                        # (SECO, PEC) send instead of RETURN. Keep it on the
+                        # same per-meter return path.
+                        case ParseType.RETURN | ParseType.REVERSE:
                           return_meters.append(meter)
                         case _:
                           _LOGGER.warning("Unknown flow direction in meter: %s", meter)
