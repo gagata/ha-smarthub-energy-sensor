@@ -77,7 +77,7 @@ class SmartHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                vol.Required(CONF_PASSWORD): str,
                vol.Required(CONF_ACCOUNT_ID): str,
                vol.Required(CONF_HOST): str,
-               vol.Required(CONF_TIMEZONE, default="GMT"): SelectSelector(
+               vol.Required(CONF_TIMEZONE, default=self.hass.config.time_zone or "GMT"): SelectSelector(
                 SelectSelectorConfig(
                   options=list(timezones), mode=SelectSelectorMode.DROPDOWN, sort=True
                 )
