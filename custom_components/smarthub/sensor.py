@@ -134,7 +134,12 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
               await self._insert_statistics(location, Aggregation.DAILY)
 
               # Fetch monthly information for entity value
-              first_day_of_current_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+              # The month boundary is local to the utility: a naive datetime.now() uses the
+              # host's zone (often UTC on Home Assistant OS), which starts the month-to-date
+              # window several hours early or late around the 1st.
+              first_day_of_current_month = datetime.now(ZoneInfo(self.api.timezone)).replace(
+                  day=1, hour=0, minute=0, second=0, microsecond=0
+              )
 
               data = await self.api.get_energy_data(location=location, start_datetime=first_day_of_current_month, aggregation=Aggregation.MONTHLY)
 
@@ -143,7 +148,7 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
                   # Return previous data if available, otherwise empty dict
                   entity_response[location.id] = {
                     ENERGY_SENSOR_KEY: 0, # no data - no energy usage for the entity.
-                    ATTR_LAST_READING_TIME: first_day_of_current_month.replace(tzinfo=ZoneInfo(self.api.timezone)), # use the TZ from the entity so it has consistent formating like 2026-02-01T00:00:00-05:00
+                    ATTR_LAST_READING_TIME: first_day_of_current_month,  # already in the utility's time zone, e.g. 2026-02-01T00:00:00-05:00
                     LOCATION_KEY: location,
                     METER_NAME: data.get(METER_NAME, None)
                   }
