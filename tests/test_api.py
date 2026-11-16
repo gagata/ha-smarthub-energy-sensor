@@ -52,3 +52,43 @@ async def test_get_token_encoding(password):
         sent_payload = kwargs.get("data")
         assert sent_payload["password"] == password
         assert sent_payload["userId"] == email
+
+
+def test_parse_usage_prefers_registers_over_net_series():
+    """FORWARD + REVERSE registers win over splitting a (gappy) NET series by sign."""
+    api = SmartHubAPI(email="test@example.com", password="p", account_id="1", timezone="UTC", mfa_totp="",
+                      host="test.smarthub.coop")
+    # Two 15-minute intervals in one hour: imports and exports happen in the same hour.
+    xs = [1762218000000, 1762218900000]
+    data = {"data": {"ELECTRIC": [{
+        "type": "USAGE",
+        "meters": [
+            {"meterNumber": "1", "seriesId": "1 - Consumption", "flowDirection": "FORWARD", "isNetMeter": True},
+            {"meterNumber": "1", "seriesId": "1 - Generation", "flowDirection": "REVERSE", "isNetMeter": True},
+            {"meterNumber": "1", "seriesId": "1 - Net", "flowDirection": "NET", "isNetMeter": True},
+        ],
+        "series": [
+            {"name": "1 - Consumption", "data": [{"x": xs[0], "y": 0.5}, {"x": xs[1], "y": 0.1}]},
+            {"name": "1 - Generation", "data": [{"x": xs[0], "y": -0.2}, {"x": xs[1], "y": -0.4}]},
+            # NET is missing the second interval, as real utilities sometimes do
+            {"name": "1 - Net", "data": [{"x": xs[0], "y": 0.3}]},
+        ],
+    }]}}
+    parsed = api.parse_usage(data)
+    assert parsed["meter_name"] == "1 - Consumption"
+    assert [round(r["consumption"], 3) for r in parsed["USAGE"]] == [0.6]
+    assert [round(r["consumption"], 3) for r in parsed["USAGE_RETURN"]] == [0.6]
+
+
+def test_parse_usage_net_only_still_splits_by_sign():
+    """Without a return register the NET series is still used for both directions."""
+    api = SmartHubAPI(email="test@example.com", password="p", account_id="1", timezone="UTC", mfa_totp="",
+                      host="test.smarthub.coop")
+    data = {"data": {"ELECTRIC": [{
+        "type": "USAGE",
+        "meters": [{"meterNumber": "1", "seriesId": "1 - Net", "flowDirection": "NET", "isNetMeter": True}],
+        "series": [{"name": "1 - Net", "data": [{"x": 1762218000000, "y": 0.3}, {"x": 1762221600000, "y": -0.2}]}],
+    }]}}
+    parsed = api.parse_usage(data)
+    assert [r["consumption"] for r in parsed["USAGE"]] == [0.3, 0]
+    assert [r["consumption"] for r in parsed["USAGE_RETURN"]] == [0, 0.2]

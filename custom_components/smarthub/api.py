@@ -228,6 +228,13 @@ class SmartHubAPI:
                         case _:
                           _LOGGER.warning("Unknown flow direction in meter: %s", meter)
 
+                    # Prefer the FORWARD (delivered) and RETURN/REVERSE (received) registers
+                    # when the utility provides both: they are complete, while the NET series
+                    # can miss readings and splitting it by sign under-counts both directions
+                    # whenever import and export happen within the same interval.
+                    use_registers = forward_series != "" and return_series != ""
+                    primary_series = forward_series if use_registers else (net_series if net_series != "" else forward_series)
+
                     series = entry.get("series", [])
                     for serie in series:
                         if serie.get("name", "") == return_series:
@@ -237,7 +244,7 @@ class SmartHubAPI:
 
                         # If there is a NetMeter, use that for both Return and Usage (as it combines both).
                         # NOTE - there must always be a FORWARD or NET meter - or the "USAGE" is not being returned.
-                        if serie.get("name", "") == (net_series if net_series != "" else forward_series):
+                        if serie.get("name", "") == primary_series:
                             parsed_response[METER_NAME] = serie.get("name")
 
                             # Extract the last data point in the "data" array
@@ -245,7 +252,7 @@ class SmartHubAPI:
                             parsed_response["USAGE"] = self.parse_usage_series(usage_data)
                             _LOGGER.debug("Parsed %d items for USAGE history", len(parsed_response["USAGE"]))
 
-                            if net_series != "":
+                            if net_series != "" and not use_registers:
                               parsed_response["USAGE_RETURN"] = self.parse_usage_series(usage_data, ParseType.NET)
                               _LOGGER.debug("Parsed %d items for USAGE_RETURN history", len(parsed_response["USAGE_RETURN"]))
                 else:
