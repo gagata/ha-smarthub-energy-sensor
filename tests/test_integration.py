@@ -288,3 +288,29 @@ def compare_SmartHubLocation(a: SmartHubLocation, b: SmartHubLocation):
     assert a.service == b.service
     assert a.description == b.description
     assert a.provider == b.provider
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_defaults_timezone_to_home_assistant(mock_hass):
+    """Entries without a timezone use Home Assistant's time zone, not GMT."""
+    entry = MockConfigEntry(
+        version=1,
+        domain=DOMAIN,
+        title="SmartHub Test",
+        data={
+            "email": "test@example.com",
+            "password": "testpass",
+            "account_id": "123456",
+            "location_id": "789012",
+            "host": "test.smarthub.coop",
+        },
+    )
+    mock_hass.config = Mock()
+    mock_hass.config.time_zone = "America/Chicago"
+    mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
+    with patch("custom_components.smarthub.SmartHubAPI") as mock_api_class, \
+            patch("custom_components.smarthub.SmartHubDataUpdateCoordinator") as mock_coordinator_cls:
+        mock_api_class.return_value.get_token = AsyncMock(return_value="token")
+        mock_coordinator_cls.return_value.async_config_entry_first_refresh = AsyncMock()
+        assert await async_setup_entry(mock_hass, entry) is True
+    assert mock_api_class.call_args.kwargs["timezone"] == "America/Chicago"

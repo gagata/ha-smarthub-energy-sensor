@@ -44,7 +44,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         email=config["email"],
         password=config["password"],
         account_id=config["account_id"],
-        timezone=config.get("timezone", "GMT"), # timezone was not previously required - default it to be GMT
+        # SmartHub reports interval timestamps in the utility's local wall-clock time. Entries
+        # created before the timezone option existed have none; the utility serves this
+        # Home Assistant's location, so use its time zone instead of GMT (which shifted every
+        # hourly statistic by the UTC offset).
+        timezone=config.get("timezone") or hass.config.time_zone,
         mfa_totp=config.get("mfa_totp", ""), # mfa_totp is optional
         host=config["host"],
     )
