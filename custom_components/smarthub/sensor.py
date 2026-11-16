@@ -140,7 +140,10 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
 
               if data.get("USAGE", None) is None or len(data.get("USAGE", None)) == 0:
                   _LOGGER.warning("No data received from SmartHub API for location %s", location)
-                  # Return previous data if available, otherwise empty dict
+                  # Keep the last good value instead of reporting 0 kWh for missing data.
+                  if self.data and location.id in self.data:
+                      entity_response[location.id] = self.data[location.id]
+                      continue
                   entity_response[location.id] = {
                     ENERGY_SENSOR_KEY: 0, # no data - no energy usage for the entity.
                     ATTR_LAST_READING_TIME: first_day_of_current_month.replace(tzinfo=ZoneInfo(self.api.timezone)), # use the TZ from the entity so it has consistent formating like 2026-02-01T00:00:00-05:00
@@ -165,13 +168,26 @@ class SmartHubDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Authentication error fetching SmartHub data: %s", e)
             # For auth errors, we want to raise UpdateFailed to trigger retry
             # but also ensure the API will refresh authentication on next attempt
-            raise UpdateFailed(f"Authentication failed: {e}") from e
+            return self._keep_last_good(UpdateFailed(f"Authentication failed: {e}"), e)
         except SmartHubAPIError as e:
             _LOGGER.error("Error fetching data from SmartHub API: %s", e)
-            raise UpdateFailed(f"Error communicating with SmartHub API: {e}") from e
+            return self._keep_last_good(UpdateFailed(f"Error communicating with SmartHub API: {e}"), e)
         except Exception as e:
             _LOGGER.exception("Unexpected error fetching SmartHub data: %s", e)
-            raise UpdateFailed(f"Unexpected error: {e}") from e
+            return self._keep_last_good(UpdateFailed(f"Unexpected error: {e}"), e)
+
+    def _keep_last_good(self, failure: UpdateFailed, cause: Exception) -> Dict[str, Any]:
+        """Keep showing the last good values through a transient failure.
+
+        SmartHub publishes usage in batches (often once a day), so a failed poll does
+        not make the previous month-to-date value wrong; marking the entity unavailable
+        (or 0) only creates gaps and spikes in history. Without previous data (first
+        refresh) the failure is raised so Home Assistant retries the setup.
+        """
+        if self.data:
+            _LOGGER.warning("Keeping last SmartHub values after a failed update: %s", cause)
+            return self.data
+        raise failure from cause
 
 
     # https://github.com/tronikos/opower/ was used as a model for how to populate
